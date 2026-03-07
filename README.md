@@ -6,6 +6,7 @@
 
 [![License](https://img.shields.io/badge/License-Apache_2.0-blue.svg)](https://opensource.org/licenses/Apache-2.0)
 [![Python Version](https://img.shields.io/badge/python-3.10%2B-blue)](https://www.python.org/downloads/)
+[![TypeScript](https://img.shields.io/badge/TypeScript-Node_18%2B-blue)](https://github.com/aipartnerup/apcore-a2a-typescript)
 
 **apcore-a2a** is an automatic [A2A (Agent-to-Agent)](https://google.github.io/A2A/) protocol adapter for the [apcore](https://github.com/aipartnerup/apcore-python) ecosystem. It allows you to expose any apcore Module Registry as a fully functional, standards-compliant A2A agent with zero manual effort.
 
@@ -28,11 +29,17 @@ By reading the existing apcore metadata—including `input_schema`, `output_sche
 
 ## Installation
 
+**Python**
 ```bash
 pip install apcore-a2a
 ```
+Requires Python 3.10+ and apcore-python 0.6.0+.
 
-*Note: Requires Python 3.10+ and apcore-python 0.6.0+.*
+**TypeScript**
+```bash
+npm install apcore-a2a
+```
+Requires Node.js 18+ and apcore-js 0.8.0+.
 
 ---
 
@@ -54,7 +61,7 @@ registry.discover()
 serve(registry, name="My Assistant Agent", host="0.0.0.0", port=8000)
 ```
 
-Your agent is now discoverable at `http://localhost:8000/.well-known/agent.json`.
+Your agent is now discoverable at `http://localhost:8000/.well-known/agent.json` (Python) or `/.well-known/agent-card.json` (TypeScript).
 
 ### 2. Call a remote A2A Agent
 
@@ -67,7 +74,7 @@ from apcore_a2a import A2AClient
 async def main():
     async with A2AClient("http://remote-agent:8000") as client:
         # Discover skills
-        card = await client.agent_card
+        card = await client.discover()
         print(f"Connected to {card['name']} with {len(card['skills'])} skills")
 
         # Send a message
@@ -100,11 +107,12 @@ apcore-a2a acts as a thin, protocol-specific layer on top of `apcore-python`. It
 
 ## Documentation
 
-Detailed documentation can be found in the `docs/` directory:
-
-- [Product Requirements (PRD)](docs/apcore-a2a/prd.md)
-- [Technical Design (TDD)](docs/apcore-a2a/tech-design.md)
-- [Software Requirements (SRS)](docs/apcore-a2a/srs.md)
+- **[Getting Started Guide](docs/getting-started.md)** — Install, serve, and call agents (Python & TypeScript)
+- [Feature Specs Overview](docs/features/overview.md) — All feature specifications
+- [Product Requirements (PRD)](docs/prd.md)
+- [Technical Design (TDD)](docs/tech-design.md)
+- [Software Requirements (SRS)](docs/srs.md)
+- [Test Plan](docs/test-plan.md)
 
 ---
 
