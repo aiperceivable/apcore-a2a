@@ -8,7 +8,9 @@
 [![Python Version](https://img.shields.io/badge/python-3.11%2B-blue)](https://www.python.org/downloads/)
 [![TypeScript](https://img.shields.io/badge/TypeScript-Node_18%2B-blue)](https://github.com/aipartnerup/apcore-a2a-typescript)
 
-**apcore-a2a** is an automatic [A2A (Agent-to-Agent)](https://google.github.io/A2A/) protocol adapter for the [apcore](https://github.com/aipartnerup/apcore-python) ecosystem. It allows you to expose any apcore Module Registry as a fully functional, standards-compliant A2A agent with zero manual effort.
+> **Build once, invoke by Code or AI.**
+
+**apcore-a2a** is an automatic [A2A (Agent-to-Agent)](https://google.github.io/A2A/) protocol adapter for the [apcore](https://github.com/aipartnerup/apcore) ecosystem. It allows you to expose any apcore Module Registry as a fully functional, standards-compliant A2A agent with zero manual effort.
 
 ### 🚀 Official SDKs
 
@@ -17,7 +19,7 @@
 
 ---
 
-By reading the existing apcore metadata—including `input_schema`, `output_schema`, descriptions, and behavioral annotations—apcore-a2a eliminates the need to hand-write Agent Cards, JSON-RPC endpoints, and task lifecycle logic.
+By reading the existing apcore metadata—including `input_schema`, `output_schema`, descriptions, behavioral annotations (readonly, cacheable, paginated, etc.), and AI metadata conventions (x-preconditions, x-cost-per-call, etc.)—apcore-a2a eliminates the need to hand-write Agent Cards, JSON-RPC endpoints, and task lifecycle logic.
 
 ## Key Features
 
@@ -137,6 +139,8 @@ apcore-a2a acts as a thin, protocol-specific layer on top of `apcore-python`. It
 |-------------|----------------|
 | **Agent Card** | Derived from Registry configuration |
 | **Skill** | Maps 1:1 to an apcore Module |
+| **Skill.tags** | `module.tags` |
+| **Skill metadata** | `annotations` (cacheable, paginated) + `metadata` (x-preconditions, x-cost-per-call, x-output-source) |
 | **Task** | Managed execution of `Executor.call_async()` |
 | **Streaming** | Wrapped `Executor.stream()` via SSE |
 | **Security** | Bridged to apcore's `Identity` context |
