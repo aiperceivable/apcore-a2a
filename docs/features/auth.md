@@ -106,8 +106,8 @@ class JWTAuthenticator:
 
 **Key resolution (CLI support):**
 ```python
-# Priority: key_file > secret arg > JWT_SECRET env var
-key = key_file_content or secret_arg or os.environ.get("JWT_SECRET")
+# Priority: key_file > secret arg > APCORE_JWT_SECRET env var
+key = key_file_content or secret_arg or os.environ.get("APCORE_JWT_SECRET")
 ```
 
 **Algorithms**: Default `["HS256"]`. Supports `RS256`, `ES256` for asymmetric keys.

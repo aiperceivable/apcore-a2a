@@ -229,7 +229,7 @@ apcore_a2a.serve(registry)
 from apcore_a2a import serve
 from apcore_a2a.auth import JWTAuthenticator
 
-auth = JWTAuthenticator(key=os.environ["JWT_SECRET"])
+auth = JWTAuthenticator(key=os.environ["APCORE_JWT_SECRET"])
 serve(registry, auth=auth, push_notifications=True, port=8080)
 ```
 

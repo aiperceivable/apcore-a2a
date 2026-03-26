@@ -230,7 +230,7 @@ Protect your agent with JWT/Bearer authentication.
     registry = Registry(extensions_dir="./extensions")
     registry.discover()
 
-    auth = JWTAuthenticator(key=os.environ["JWT_SECRET"])
+    auth = JWTAuthenticator(key=os.environ["APCORE_JWT_SECRET"])
 
     serve(
         registry,
@@ -252,7 +252,7 @@ Protect your agent with JWT/Bearer authentication.
     ```typescript
     import { serve, JWTAuthenticator } from "apcore-a2a";
 
-    const auth = new JWTAuthenticator({ key: process.env.JWT_SECRET! });
+    const auth = new JWTAuthenticator({ key: process.env.APCORE_JWT_SECRET! });
 
     serve(registry, {
       name: "Secure Agent",

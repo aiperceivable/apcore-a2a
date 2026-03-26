@@ -204,12 +204,12 @@ except Exception as e:
 
 ```python
 def _resolve_auth_key(auth_key: str | None) -> str | None:
-    """Resolve auth key: file path > direct value > JWT_SECRET env var.
+    """Resolve auth key: file path > direct value > APCORE_JWT_SECRET env var.
 
     Priority order:
     1. If auth_key is a path to an existing file → read file contents.
     2. If auth_key is provided and not a file path → use as literal key.
-    3. If auth_key is None → check os.environ.get("JWT_SECRET").
+    3. If auth_key is None → check os.environ.get("APCORE_JWT_SECRET").
     4. Return None if all sources empty.
     """
     if auth_key:
@@ -217,7 +217,7 @@ def _resolve_auth_key(auth_key: str | None) -> str | None:
         if p.exists():
             return p.read_text().strip()
         return auth_key
-    return os.environ.get("JWT_SECRET")
+    return os.environ.get("APCORE_JWT_SECRET")
 ```
 
 ---
@@ -239,7 +239,7 @@ def _resolve_auth_key(auth_key: str | None) -> str | None:
 apcore-a2a serve --extensions-dir ./extensions
 
 # With auth
-apcore-a2a serve --extensions-dir ./ext --auth-type bearer --auth-key $JWT_SECRET
+apcore-a2a serve --extensions-dir ./ext --auth-type bearer --auth-key $APCORE_JWT_SECRET
 
 # With auth key file
 apcore-a2a serve --extensions-dir ./ext --auth-type bearer --auth-key /run/secrets/jwt.key
@@ -252,7 +252,7 @@ apcore-a2a serve \
   --name "My Agent" \
   --description "Agent for image processing" \
   --auth-type bearer \
-  --auth-key $JWT_SECRET \
+  --auth-key $APCORE_JWT_SECRET \
   --auth-issuer https://auth.example.com \
   --push-notifications \
   --explorer \
@@ -291,7 +291,7 @@ src/apcore_a2a/
 - All validation errors print to `stderr` and exit with code 1 (not 2)
 - Runtime errors exit with code 2
 - Clean shutdown exits with code 0
-- `--auth-key` accepts file path or literal string or falls back to `JWT_SECRET` env var
+- `--auth-key` accepts file path or literal string or falls back to `APCORE_JWT_SECRET` env var
 - No modules discovered → exit 1 immediately (don't start server with empty card)
 - Extensions dir must exist AND be a directory (two separate checks, distinct messages)
 
