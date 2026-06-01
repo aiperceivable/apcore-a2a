@@ -15,7 +15,7 @@
 
 ## Background
 
-apcore-a2a originated from the observation that apcore modules already carry all the metadata the A2A (Agent-to-Agent) protocol needs -- `input_schema`, `output_schema`, `description`, `annotations`, `tags`, and `examples` -- yet there is no standard way to expose them to A2A clients, orchestrators, or peer agents. The idea was validated through analysis of the A2A protocol specification (v0.3.0), competitive landscape assessment (LangChain and CrewAI shipping A2A integrations), and demand signals (A2A adopted by 50+ partners including Google, Salesforce, SAP, ServiceNow; moved to Linux Foundation governance in April 2025). The core insight: since the mapping from apcore metadata to A2A concepts (Agent Card, Skills, Task lifecycle) is nearly 1:1, a single adapter package can eliminate all manual A2A server construction work for the entire apcore ecosystem. This is the natural counterpart to apcore-mcp: MCP handles model-to-tool communication; A2A handles agent-to-agent communication. Together they make apcore the only schema-driven framework that natively bridges to both major AI interoperability protocols from a single module definition. This PRD formalizes the validated idea into actionable requirements.
+apcore-a2a originated from the observation that apcore modules already carry all the metadata the A2A (Agent-to-Agent) protocol needs -- `input_schema`, `output_schema`, `description`, `annotations`, `tags`, and `examples` -- yet there is no standard way to expose them to A2A clients, orchestrators, or peer agents. The idea was validated through analysis of the A2A protocol specification (1.0), competitive landscape assessment (LangChain and CrewAI shipping A2A integrations), and demand signals (A2A adopted by 50+ partners including Google, Salesforce, SAP, ServiceNow; moved to Linux Foundation governance in April 2025). The core insight: since the mapping from apcore metadata to A2A concepts (Agent Card, Skills, Task lifecycle) is nearly 1:1, a single adapter package can eliminate all manual A2A server construction work for the entire apcore ecosystem. This is the natural counterpart to apcore-mcp: MCP handles model-to-tool communication; A2A handles agent-to-agent communication. Together they make apcore the only schema-driven framework that natively bridges to both major AI interoperability protocols from a single module definition. This PRD formalizes the validated idea into actionable requirements.
 
 ---
 
@@ -200,7 +200,7 @@ apcore-a2a (this project -- A2A protocol)
 | **A2A SDK Direct** | Build agent from scratch using official SDK | Full | None -- capabilities re-described | Medium (200+ lines, 1-2 weeks) | SDK-assisted | SDK-assisted | Manual implementation | None |
 | **LangChain A2A** | LangChain agent exposed via A2A wrapper | Partial (LangChain-filtered) | LangChain tools only | Low-Medium | LangChain streaming | Not yet available | LangChain memory | High (LangChain) |
 | **CrewAI A2A** | CrewAI agent exposed via A2A bridge | Partial | CrewAI tasks only | Low-Medium | Limited | Not yet available | CrewAI context | High (CrewAI) |
-| **apcore-a2a (this project)** | Auto-bridge from apcore Registry | **Full (v0.3.0)** | **Complete** (schema, annotations, tags, examples) | **Very Low** (1 function call) | **Automatic** (modules with streaming) | **Included** (v1) | **contextId-based** | Moderate (apcore) |
+| **apcore-a2a (this project)** | Auto-bridge from apcore Registry | **Full (1.0)** | **Complete** (schema, annotations, tags, examples) | **Very Low** (1 function call) | **Automatic** (modules with streaming) | **Included** (v1) | **contextId-based** | Moderate (apcore) |
 
 ### 5.3 Differentiation Summary
 
@@ -524,7 +524,7 @@ serve(registry)
 **User Story:** US-002
 
 **Acceptance Criteria:**
-1. Agent Card conforms to A2A v0.3.0 Agent Card JSON Schema.
+1. Agent Card conforms to A2A 1.0 Agent Card JSON Schema.
 2. `AgentCard.name` populated from Registry config `project.name`; fallback to `"apcore-agent"` if not configured.
 3. `AgentCard.description` populated from Registry config `project.description`; fallback to auto-generated description listing module count.
 4. `AgentCard.version` populated from Registry config `project.version`; fallback to `"0.0.0"`.
@@ -751,7 +751,7 @@ serve(registry)
 1. `message/stream` returns an HTTP response with `Content-Type: text/event-stream`.
 2. `TaskStatusUpdateEvent` is emitted on each state transition (submitted --> working --> completed/failed).
 3. `TaskArtifactUpdateEvent` is emitted when the module produces incremental output.
-4. Events conform to A2A v0.3.0 SSE event schema.
+4. Events conform to A2A 1.0 SSE event schema.
 5. For streaming-capable modules (`Executor.stream()`), intermediate output chunks produce `TaskArtifactUpdateEvent` with `append: true`.
 6. For non-streaming modules, the stream emits status updates only (submitted --> working --> completed/failed).
 7. The final event is always a `TaskStatusUpdateEvent` with a terminal state (completed, failed, or canceled).
@@ -851,15 +851,14 @@ async for event in client.stream_message(message):
 **Acceptance Criteria:**
 1. `tasks/pushNotificationConfig/set` registers a webhook URL for a specific task.
 2. `tasks/pushNotificationConfig/get` returns the current push notification configuration for a task.
-3. `tasks/pushNotificationConfig/list` returns all push notification configurations.
-4. `tasks/pushNotificationConfig/delete` removes a push notification configuration.
-5. On each task state transition, an HTTP POST is sent to the registered webhook URL with the event payload.
-6. Webhook payload conforms to A2A v0.3.0 push notification schema.
-7. Failed deliveries retry up to 3 times with exponential backoff (1s, 2s, 4s delays).
-8. After 3 failed retries, the push notification configuration is marked as `failed`.
-9. Webhook URLs must be HTTPS in production mode; HTTP allowed in development mode (configurable).
-10. Agent Card `capabilities.pushNotifications` is set to `true` when push notifications are enabled.
-11. Push notifications are disabled by default; enabled via `serve(registry, push_notifications=True)`.
+3. `tasks/pushNotificationConfig/delete` removes a push notification configuration.
+4. On each task state transition, an HTTP POST is sent to the registered webhook URL with the event payload.
+5. Webhook payload conforms to A2A 1.0 push notification schema.
+6. Failed deliveries retry up to 3 times with exponential backoff (1s, 2s, 4s delays).
+7. After 3 failed retries, the push notification configuration is marked as `failed`.
+8. Webhook URLs must be HTTPS in production mode; HTTP allowed in development mode (configurable).
+9. Agent Card `capabilities.pushNotifications` is set to `true` when push notifications are enabled.
+10. Push notifications are disabled by default; enabled via `serve(registry, push_notifications=True)`.
 
 **Dependencies:** FR-005, FR-008
 
@@ -1101,7 +1100,7 @@ apcore-a2a serve --extensions-dir ./extensions --push-notifications
 
 | Requirement | Detail |
 |-------------|--------|
-| A2A protocol version | Full compliance with A2A v0.3.0 specification |
+| A2A protocol version | Full compliance with A2A 1.0 specification |
 | apcore-python version | Compatible with apcore-python >= 0.6.0 |
 | a2a-sdk version | Uses official `a2a-sdk` Python package (latest stable) |
 | Python version | Python >= 3.10 |
@@ -1132,7 +1131,7 @@ apcore-a2a serve --extensions-dir ./extensions --push-notifications
 | Schema mapping accuracy | 100% of apcore module fields correctly mapped to A2A Skill and Agent Card fields | Automated test suite with full field coverage |
 | Integration time | < 5 minutes from `pip install` to working A2A server | Timed walkthrough with documented quickstart |
 | Lines of user code for basic A2A server | <= 5 lines | Count lines in quickstart example |
-| A2A method coverage | 100% of v0.3.0 methods implemented | Feature checklist: message/send, message/stream, tasks/get, tasks/list, tasks/cancel, tasks/resubscribe, push notification CRUD, agentCard/get |
+| A2A method coverage | 100% of A2A 1.0 methods implemented | Feature checklist: message/send, message/stream, tasks/get, tasks/list, tasks/cancel, tasks/resubscribe, push notification CRUD, agentCard/get |
 | Error mapping coverage | 100% of apcore error types mapped | Unit tests for each error type |
 | Test coverage | >= 90% line coverage | `pytest --cov` report |
 | P0 feature completion | 11/11 features pass acceptance criteria | Feature acceptance testing |
@@ -1294,7 +1293,7 @@ The following must all be true before the v1.0.0 release:
 3. Test coverage >= 90% on core logic (`src/apcore_a2a/`).
 4. Verified working with at least one A2A reference client.
 5. Verified working with at least one non-apcore A2A agent (interoperability).
-6. Agent Card validates against A2A v0.3.0 JSON Schema.
+6. Agent Card validates against A2A 1.0 JSON Schema.
 7. Quickstart documentation exists and is verified by a developer who did not write the code.
 8. `pyproject.toml` is complete with correct dependencies, metadata, and entry points.
 9. No known P0 or P1 bugs.
@@ -1318,7 +1317,7 @@ The following must all be true before the v1.0.0 release:
 | ID | Question | Impact | Status | Proposed Resolution |
 |----|----------|--------|--------|---------------------|
 | OQ-001 | How should structured JSON input be conveyed via A2A's text-based Message Parts? | FR-004, FR-006 | Open | Support both: (1) DataPart with `application/json` media type for structured input, (2) TextPart with JSON string that is auto-parsed based on Skill's declared `inputModes`. Prioritize DataPart for programmatic callers. |
-| OQ-002 | Should the Agent Card expose `output_schema` information? A2A has no native field for this. | FR-002, FR-003 | Open | Use Skill `extensions` field (A2A v0.3.0 supports extensions) to include `outputSchema` as custom metadata. This is non-breaking and discoverable by apcore-aware clients. Non-apcore clients ignore extensions. |
+| OQ-002 | Should the Agent Card expose `output_schema` information? A2A has no native field for this. | FR-002, FR-003 | Resolved | A2A 1.0 `AgentSkill` has no `extensions` field, so output schema is **not** carried on the Skill. The converted `output_schema` is attached to Artifact metadata, and apcore-specific schema details are surfaced to apcore-aware tooling via the Explorer UI's `_inputSchemas` enrichment. Standard A2A clients see a clean Agent Card. |
 | OQ-003 | How should apcore's `requires_approval` map to A2A's `input_required` state? | FR-005, FR-006, FR-011 | Open | Map to `input_required` state with a structured message indicating approval is needed (type: "approval_request", module_id, description, arguments). Follow-up message with approval confirmation resumes execution. This is semantically closest to A2A's intent for human-in-the-loop scenarios. |
 | OQ-004 | How should `contextId` persistence work across server restarts? | FR-011, FR-015 | Open | Delegate to task store implementation. In-memory store loses context on restart (documented limitation). Persistent stores (Redis, PostgreSQL) maintain context across restarts. Document this as a deployment consideration with guidance on when to use persistent stores. |
 | OQ-005 | Should the A2A Client be importable independently without server dependencies? | FR-010 | Open | Yes. Structure the package so `from apcore_a2a.client import A2AClient` does not import server-side dependencies (starlette, uvicorn). Use lazy imports or optional dependency groups (`pip install apcore-a2a[client]`). |
@@ -1577,7 +1576,7 @@ ApprovalPendingError(module_id)
 |-----------|-------------|
 | `ideas/apcore-a2a.md` | Original idea document with validation status, schema mappings, and competitive analysis |
 | apcore-python SDK | Python SDK providing Registry, Executor, ModuleDescriptor, ModuleAnnotations, error hierarchy |
-| [A2A Protocol Specification (v0.3.0)](https://google.github.io/A2A/) | Official Agent-to-Agent protocol specification by Google/Linux Foundation |
+| [A2A Protocol Specification (1.0)](https://google.github.io/A2A/) | Official Agent-to-Agent protocol specification by Google/Linux Foundation |
 | [A2A Python SDK (a2a-sdk)](https://pypi.org/project/a2a-sdk/) | Official Python SDK for building A2A agents and clients |
 | apcore-mcp PRD | Reference PRD for the sibling MCP adapter -- architectural pattern reference |
 | apcore SCOPE.md | apcore's scope document that designates MCP/A2A adapters as independent projects |
