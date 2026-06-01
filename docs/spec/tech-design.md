@@ -424,7 +424,7 @@ class SkillMapper:
             descriptor.tags          -> Skill.tags
             descriptor.examples[:10] -> Skill.examples
             computed                 -> Skill.inputModes, outputModes
-            annotations              -> Skill.extensions.apcore.annotations
+            (annotations are NOT mapped to the Skill — see note below)
         """
 
     def _humanize_module_id(self, module_id: str) -> str:
@@ -439,9 +439,6 @@ class SkillMapper:
 
     def _build_examples(self, descriptor: object) -> list[dict]:
         """Convert apcore examples to A2A Skill examples (max 10)."""
-
-    def _build_extensions(self, annotations: object | None) -> dict | None:
-        """Build extensions.apcore.annotations from ModuleAnnotations."""
 ```
 
 **Input/output mode logic:**
@@ -454,21 +451,12 @@ class SkillMapper:
 | `output_schema` defined | `["application/json"]` |
 | No `output_schema` | `["text/plain"]` |
 
-**Extensions structure:**
-
-```json
-{
-  "apcore": {
-    "annotations": {
-      "readonly": false,
-      "destructive": false,
-      "idempotent": false,
-      "requires_approval": false,
-      "open_world": true
-    }
-  }
-}
-```
+**Note on annotations:** apcore module annotations are **not** mapped onto the A2A
+Skill. The A2A 1.0 `AgentSkill` type has no `extensions` field, so there is no
+`_build_extensions()` method and no `extensions.apcore.annotations` payload.
+Annotations (`readonly`, `destructive`, `idempotent`, `requires_approval`,
+`open_world`) are instead surfaced through the Explorer UI's `_inputSchemas`
+enrichment, keeping the standard Agent Card free of apcore-specific fields.
 
 #### 4.3.3 `SchemaConverter`
 
@@ -2256,6 +2244,24 @@ sequenceDiagram
 
 ---
 
+### 8.8 Error Formatter Registry
+
+apcore 0.22 exposes an `ErrorFormatterRegistry` that lets integrations advertise a
+named, discoverable error formatter. On startup, every apcore-a2a SDK registers its
+`ErrorMapper` under the `"a2a"` key:
+
+```python
+ErrorFormatterRegistry.register("a2a", ErrorMapper())
+```
+
+This makes the A2A error-to-JSON-RPC mapping (see §4.3.4 and §9.1) discoverable by
+the wider apcore ecosystem — other apcore components can look up the `"a2a"`
+formatter to produce A2A-shaped errors without importing apcore-a2a internals. The
+Python, TypeScript, and Rust SDKs all register the same `"a2a"` key with equivalent
+mapping behavior.
+
+---
+
 ## 9. Error Handling Strategy
 
 ### 9.1 Error Mapping Table
@@ -2312,6 +2318,24 @@ All JSON-RPC errors follow this structure:
 ```
 
 The `data.type` field enables programmatic error handling by clients without parsing the human-readable `message`.
+
+### 9.13 Config Bus Namespace
+
+apcore 0.22 provides a Config Bus for namespaced, env-overridable configuration. On
+startup, every apcore-a2a SDK registers the `apcore-a2a` namespace with env prefix
+`APCORE_A2A` (single underscore) and the following defaults:
+
+| Key | Default | Env override |
+|-----|---------|--------------|
+| `execution_timeout` | `300` | `APCORE_A2A_EXECUTION_TIMEOUT` |
+| `cors_origins` | `[]` | `APCORE_A2A_CORS_ORIGINS` |
+| `explorer` | `false` | `APCORE_A2A_EXPLORER` |
+| `metrics` | `false` | `APCORE_A2A_METRICS` |
+| `push_notifications` | `false` | `APCORE_A2A_PUSH_NOTIFICATIONS` |
+
+Environment variables under the `APCORE_A2A_` prefix override the registered
+defaults (see the full env-var table in §13.4). The Python, TypeScript, and Rust
+SDKs register the same namespace, prefix, and defaults.
 
 ---
 
@@ -2712,21 +2736,28 @@ services:
 
 | Variable | Default | Description |
 |----------|---------|-------------|
-| `EXTENSIONS_DIR` | `./extensions` | Path to apcore extensions directory |
-| `HOST` | `0.0.0.0` | Server bind host |
-| `PORT` | `8000` | Server bind port |
-| `LOG_LEVEL` | `info` | Logging level |
-| `AGENT_NAME` | `apcore-agent` | Agent Card name |
-| `AGENT_DESCRIPTION` | (auto-generated) | Agent Card description |
-| `AGENT_VERSION` | `0.0.0` | Agent Card version |
-| `JWT_KEY` | (none) | JWT verification key (enables auth) |
-| `JWT_ISSUER` | (none) | Expected JWT issuer |
-| `JWT_AUDIENCE` | (none) | Expected JWT audience |
-| `PUSH_NOTIFICATIONS` | `false` | Enable push notifications |
-| `TASK_STORE_TTL` | `3600` | Task TTL in seconds |
-| `TASK_STORE_MAX` | `10000` | Maximum task store capacity |
-| `EXECUTION_TIMEOUT` | `300` | Module execution timeout in seconds |
-| `SHUTDOWN_TIMEOUT` | `30` | Graceful shutdown timeout in seconds |
+apcore-a2a configuration env vars use the `APCORE_A2A_` prefix (registered with the
+apcore Config Bus under the `apcore-a2a` namespace; see §9.13). The JWT
+verification secret uses the shared `APCORE_JWT_SECRET` name documented in the auth
+and CLI feature specs.
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `APCORE_A2A_EXTENSIONS_DIR` | `./extensions` | Path to apcore extensions directory |
+| `APCORE_A2A_HOST` | `0.0.0.0` | Server bind host |
+| `APCORE_A2A_PORT` | `8000` | Server bind port |
+| `APCORE_A2A_LOG_LEVEL` | `info` | Logging level |
+| `APCORE_A2A_AGENT_NAME` | `apcore-agent` | Agent Card name |
+| `APCORE_A2A_AGENT_DESCRIPTION` | (auto-generated) | Agent Card description |
+| `APCORE_A2A_AGENT_VERSION` | `0.0.0` | Agent Card version |
+| `APCORE_JWT_SECRET` | (none) | JWT verification key/secret (enables auth) |
+| `APCORE_A2A_JWT_ISSUER` | (none) | Expected JWT issuer |
+| `APCORE_A2A_JWT_AUDIENCE` | (none) | Expected JWT audience |
+| `APCORE_A2A_PUSH_NOTIFICATIONS` | `false` | Enable push notifications |
+| `APCORE_A2A_TASK_STORE_TTL` | `3600` | Task TTL in seconds |
+| `APCORE_A2A_TASK_STORE_MAX` | `10000` | Maximum task store capacity |
+| `APCORE_A2A_EXECUTION_TIMEOUT` | `300` | Module execution timeout in seconds |
+| `APCORE_A2A_SHUTDOWN_TIMEOUT` | `30` | Graceful shutdown timeout in seconds |
 
 ---
 
