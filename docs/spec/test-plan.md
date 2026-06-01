@@ -580,7 +580,7 @@ jobs:
 
 ---
 
-#### TC-SKL-009: Annotations included as Skill extensions
+#### TC-SKL-009: Annotations are NOT mapped to Skill extensions
 
 | Field | Value |
 |-------|-------|
@@ -592,14 +592,13 @@ jobs:
 
 **Test Steps:**
 1. Map descriptor.
-2. Assert `skill.extensions["apcore"]["annotations"]["readonly"] == True`.
-3. Assert `skill.extensions["apcore"]["annotations"]["destructive"] == False`.
+2. Assert the resulting Skill has no `extensions` field (A2A 1.0 `AgentSkill` has no such field).
 
-**Expected Result:** Annotations in extensions with correct boolean values.
+**Expected Result:** The Skill carries no annotation/extensions data; annotations are surfaced separately via the Explorer UI's `_inputSchemas` enrichment.
 
 ---
 
-#### TC-SKL-010: Modules with None annotations omit extensions key
+#### TC-SKL-010: Modules with None annotations produce no extensions field
 
 | Field | Value |
 |-------|-------|
@@ -611,9 +610,9 @@ jobs:
 
 **Test Steps:**
 1. Map descriptor.
-2. Assert `"apcore"` NOT in `skill.extensions` (or extensions is empty/None).
+2. Assert the resulting Skill has no `extensions` field (A2A 1.0 `AgentSkill` has no such field).
 
-**Expected Result:** No apcore extension key.
+**Expected Result:** No extensions field on the Skill, regardless of annotations.
 
 ---
 
@@ -2017,16 +2016,16 @@ schema = {
      "params": {
        "message": {
          "role": "user", "messageId": "msg-uuid-001",
-         "parts": [{"kind": "data", "data": {"a": 3, "b": 4}}],
+         "parts": [{"data": {"a": 3, "b": 4}}],
          "metadata": {"skillId": "math.add"}
        }
      }
    }
    ```
 2. Assert HTTP 200.
-3. Assert `result.kind == "task"`.
-4. Assert `result.status.state == "TASK_STATE_COMPLETED"`.
-5. Assert `result.artifacts[0].parts[0].data == {"sum": 7}`.
+3. Assert `"task" in result` (A2A 1.0 oneof-wrapped result).
+4. Assert `result.task.status.state == "TASK_STATE_COMPLETED"`.
+5. Assert `result.task.artifacts[0].parts[0].data == {"sum": 7}`.
 
 **Expected Result:** Completed task with `{"sum": 7}` artifact.
 
@@ -2045,9 +2044,9 @@ schema = {
 **Test Steps:**
 1. POST `message/stream` for `data.count`.
 2. Collect all SSE events.
-3. Assert first event: `kind == "statusUpdate"`, `state == "TASK_STATE_SUBMITTED"`.
-4. Assert 3 artifactUpdate events follow.
-5. Assert last event: `kind == "statusUpdate"`, `state == "TASK_STATE_COMPLETED"` (terminal state ends the stream; A2A 1.0 has no `final` flag).
+3. Assert first event: `"statusUpdate" in event`, `state == "TASK_STATE_SUBMITTED"`.
+4. Assert 3 `artifactUpdate` events follow (`"artifactUpdate" in event`).
+5. Assert last event: `"statusUpdate" in event`, `state == "TASK_STATE_COMPLETED"` (terminal state ends the stream; A2A 1.0 has no `final` flag).
 
 **Expected Result:** Events in order: submitted → 3×artifact → completed.
 
