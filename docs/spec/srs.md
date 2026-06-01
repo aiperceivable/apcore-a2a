@@ -280,7 +280,7 @@ apcore-a2a is the second adapter in the planned family. It depends on the `apcor
 3. Malformed JSON SHALL return JSON-RPC error -32700 (Parse error).
 4. Invalid JSON-RPC structure SHALL return JSON-RPC error -32600 (Invalid Request).
 5. Unknown method names SHALL return JSON-RPC error -32601 (Method not found).
-6. The server SHALL dispatch the following A2A methods: `message/send`, `message/stream`, `tasks/get`, `tasks/cancel`, `tasks/resubscribe`, `tasks/pushNotificationConfig/set`, `tasks/pushNotificationConfig/get`, `tasks/pushNotificationConfig/delete`.
+6. The server SHALL dispatch the following A2A methods: `message/send`, `message/stream`, `tasks/get`, `tasks/list`, `tasks/cancel`, `tasks/resubscribe`, `tasks/pushNotificationConfig/set`, `tasks/pushNotificationConfig/get`, `tasks/pushNotificationConfig/delete`.
 7. Request body size SHALL be limited to 10 MB; requests exceeding this limit SHALL return HTTP 413.
 
 ---
@@ -327,7 +327,7 @@ apcore-a2a is the second adapter in the planned family. It depends on the `apcor
 2. `AgentCard.name` SHALL be populated from Registry config `project.name`; fallback to `"apcore-agent"` if not configured.
 3. `AgentCard.description` SHALL be populated from Registry config `project.description`; fallback to auto-generated description listing module count (e.g., "apcore agent with 10 skills").
 4. `AgentCard.version` SHALL be populated from Registry config `project.version`; fallback to `"0.0.0"`.
-5. `AgentCard.url` SHALL be populated from the server's bound address (scheme + host + port).
+5. `AgentCard.supportedInterfaces[0].url` SHALL be populated from the server's bound address (scheme + host + port). (A2A 1.0 removed the top-level `AgentCard.url` field; the server address is exposed via `supportedInterfaces[]`.)
 6. `AgentCard.skills[]` SHALL contain one Skill per registered module (per FR-SKL requirements).
 7. `AgentCard.defaultInputModes` SHALL include `"application/json"`.
 8. `AgentCard.defaultOutputModes` SHALL include `"application/json"`.
@@ -347,7 +347,7 @@ apcore-a2a is the second adapter in the planned family. It depends on the `apcor
 **Rationale:** Capabilities inform A2A clients about supported interaction modes. Automatic computation from module metadata ensures accuracy without manual configuration.
 
 **Acceptance Criteria:**
-1. `capabilities.streaming` SHALL be `true` if at least one registered module supports streaming (determined by Executor capability).
+1. `capabilities.streaming` SHALL be `true` unconditionally, since the apcore Executor's streaming path is always available.
 2. `capabilities.pushNotifications` SHALL be `true` if push notifications are enabled via `serve(registry, push_notifications=True)`.
 3. The task store SHALL record state-transition history when it supports history recording. (A2A 1.0 removed the 0.3 `capabilities.stateTransitionHistory` flag; history is no longer advertised as a capability.)
 4. If no modules support streaming AND push notifications are disabled AND history is not supported, `capabilities` SHALL still be present with all fields set to `false`.
@@ -577,8 +577,8 @@ apcore-a2a is the second adapter in the planned family. It depends on the `apcor
 3. `TextPart` containing valid JSON SHALL be auto-parsed to a dict when the module's `input_schema` root type is `object`.
 4. `TextPart` containing invalid JSON when the module expects an object SHALL return JSON-RPC error -32602 with message "Invalid JSON in TextPart".
 5. Messages with zero Parts SHALL return JSON-RPC error -32602 with message "Message must contain at least one Part".
-6. Messages with multiple Parts SHALL use the first Part matching the skill's declared `inputModes`; remaining Parts SHALL be stored in the context for multi-turn access.
-7. `FilePart` SHALL be passed as a dict with keys `uri`, `name`, and `mimeType` to modules that accept file input.
+6. Messages SHALL contain exactly one Part; messages with multiple Parts SHALL return JSON-RPC error -32602 with message "Multiple parts are not supported; expected exactly one Part".
+7. `FilePart` is not supported and SHALL return JSON-RPC error -32602 with message "FilePart is not supported".
 
 ---
 
@@ -597,7 +597,7 @@ apcore-a2a is the second adapter in the planned family. It depends on the `apcor
 **Acceptance Criteria:**
 1. Dict output SHALL be converted to a `DataPart` with media type `application/json` and the dict serialized as the data field.
 2. String output SHALL be converted to a `TextPart`.
-3. Output containing a `bytes` value SHALL be converted to a `FilePart` with appropriate media type detection.
+3. List output SHALL be converted to a `TextPart` containing the JSON-serialized list; any other non-string, non-dict, non-list value SHALL be converted to a `TextPart` containing its string representation.
 4. `None` output SHALL produce an empty Artifact (zero Parts).
 5. Each Task SHALL contain exactly one Artifact upon completion (containing one or more Parts from the module output).
 
@@ -617,8 +617,8 @@ apcore-a2a is the second adapter in the planned family. It depends on the `apcor
 
 **Acceptance Criteria:**
 1. The server SHALL detect client disconnection within 5 seconds via TCP connection monitoring.
-2. When `cancel_on_disconnect=True` (default), client disconnection SHALL trigger task cancellation via CancelToken.
-3. When `cancel_on_disconnect=False`, the task SHALL continue executing in the background; the client may reconnect via `tasks/resubscribe`.
+2. The `cancel_on_disconnect` parameter is deprecated and has no effect: the underlying a2a-sdk `DefaultRequestHandler` does not support disabling disconnect-driven cancellation. Passing `cancel_on_disconnect=False` SHALL emit a deprecation warning but otherwise be a no-op.
+3. After a disconnect, the client may reconnect to an active task's event stream via `tasks/resubscribe`.
 4. Resource cleanup (stream buffers, event queues) SHALL occur within 1 second of disconnection detection.
 
 ---
@@ -863,7 +863,7 @@ apcore-a2a is the second adapter in the planned family. It depends on the `apcor
 **Acceptance Criteria:**
 1. `ModuleNotFoundError` SHALL produce JSON-RPC error with code -32601.
 2. The error message SHALL include the requested module ID (e.g., "Skill not found: <module_id>").
-3. The error `data` field SHALL include `{"type": "ModuleNotFoundError"}`.
+3. The JSON-RPC error object is `{code, message}` only; no `data` field is emitted in v0.4.
 
 ---
 
@@ -881,8 +881,8 @@ apcore-a2a is the second adapter in the planned family. It depends on the `apcor
 
 **Acceptance Criteria:**
 1. `SchemaValidationError` SHALL produce JSON-RPC error with code -32602.
-2. The error `data` field SHALL include an `errors` array with objects containing `field`, `code`, and `message` for each validation failure.
-3. The error `data` field SHALL include `{"type": "SchemaValidationError"}`.
+2. The validation failure detail SHALL be conveyed in the error `message`.
+3. The JSON-RPC error object is `{code, message}` only; no `data` field is emitted in v0.4.
 
 ---
 
@@ -902,7 +902,7 @@ apcore-a2a is the second adapter in the planned family. It depends on the `apcor
 1. `ACLDeniedError` SHALL produce JSON-RPC error with code -32001.
 2. The error message SHALL be a generic "Task not found" (not "Access denied").
 3. The error SHALL NOT include caller_id, target_id, or ACL rule details in any field.
-4. The error `data` field SHALL include `{"type": "TaskNotFoundError"}` (masking the true error type).
+4. The JSON-RPC error object is `{code, message}` only; no `data` field is emitted in v0.4 (the true error type is not exposed).
 5. The actual ACL denial SHALL be logged at WARNING level with full details for server-side debugging.
 
 ---
@@ -922,7 +922,7 @@ apcore-a2a is the second adapter in the planned family. It depends on the `apcor
 **Acceptance Criteria:**
 1. `ModuleExecuteError` SHALL produce JSON-RPC error with code -32603.
 2. The error message SHALL be sanitized: no stack traces, file paths, or internal configuration values.
-3. The error `data` field SHALL include `{"type": "ModuleExecuteError"}`.
+3. The JSON-RPC error object is `{code, message}` only; no `data` field is emitted in v0.4.
 
 ---
 
@@ -941,7 +941,7 @@ apcore-a2a is the second adapter in the planned family. It depends on the `apcor
 **Acceptance Criteria:**
 1. `ModuleTimeoutError` SHALL produce JSON-RPC error with code -32603.
 2. The error message SHALL be "Execution timed out".
-3. The error `data` field SHALL include `{"type": "ModuleTimeoutError"}`.
+3. The JSON-RPC error object is `{code, message}` only; no `data` field is emitted in v0.4.
 
 ---
 
@@ -960,7 +960,7 @@ apcore-a2a is the second adapter in the planned family. It depends on the `apcor
 **Acceptance Criteria:**
 1. `InvalidInputError` SHALL produce JSON-RPC error with code -32602.
 2. The error message SHALL include the input error description.
-3. The error `data` field SHALL include `{"type": "InvalidInputError"}`.
+3. The JSON-RPC error object is `{code, message}` only; no `data` field is emitted in v0.4.
 
 ---
 
@@ -980,7 +980,7 @@ apcore-a2a is the second adapter in the planned family. It depends on the `apcor
 1. `CallDepthExceededError` SHALL produce JSON-RPC error -32603 with message "Safety limit exceeded".
 2. `CircularCallError` SHALL produce JSON-RPC error -32603 with message "Safety limit exceeded".
 3. `CallFrequencyExceededError` SHALL produce JSON-RPC error -32603 with message "Safety limit exceeded".
-4. The error `data.type` SHALL identify the specific error type for programmatic handling.
+4. The JSON-RPC error object is `{code, message}` only; no `data` field is emitted in v0.4.
 
 ---
 
@@ -1000,7 +1000,7 @@ apcore-a2a is the second adapter in the planned family. It depends on the `apcor
 1. Any exception not matched by FR-ERR-001 through FR-ERR-007 SHALL produce JSON-RPC error -32603.
 2. The error message SHALL be "Internal error".
 3. The error SHALL NOT include stack traces, file paths, or internal variable values.
-4. The error `data` field SHALL include `{"type": "InternalError"}`.
+4. The JSON-RPC error object is `{code, message}` only; no `data` field is emitted in v0.4.
 5. The actual exception SHALL be logged at ERROR level with full stack trace for server-side debugging.
 
 ---
@@ -1214,7 +1214,7 @@ apcore-a2a is the second adapter in the planned family. It depends on the `apcor
 **Rationale:** Push notifications enable async workflows where clients do not maintain persistent connections. Webhook URLs must be registered per-task.
 
 **Acceptance Criteria:**
-1. `tasks/pushNotificationConfig/set` with `{"taskId": "<id>", "url": "<webhook_url>"}` SHALL register the webhook.
+1. `tasks/pushNotificationConfig/set` with `{"id": "<taskId>", "pushNotificationConfig": {"url": "<webhook_url>", ...}}` SHALL register the webhook.
 2. Webhook URLs SHALL be validated as well-formed URLs.
 3. In production mode, webhook URLs SHALL be required to use HTTPS; HTTP SHALL be rejected with error -32602.
 4. In development mode (configurable), HTTP webhook URLs SHALL be allowed.
@@ -2409,7 +2409,7 @@ apcore-a2a is the second adapter in the planned family. It depends on the `apcor
 **Main Flow:**
 1. Orchestrator sends `message/send` to start a long-running task.
 2. Server creates Task and returns it with `taskId`.
-3. Orchestrator sends `tasks/pushNotificationConfig/set` with `{"taskId": "<id>", "url": "https://hooks.orchestrator.com/a2a"}`.
+3. Orchestrator sends `tasks/pushNotificationConfig/set` with `{"id": "<taskId>", "pushNotificationConfig": {"url": "https://hooks.orchestrator.com/a2a"}}`.
 4. Server validates the webhook URL (HTTPS, not loopback).
 5. Server stores the push notification configuration.
 6. Task progresses: submitted -> working -> completed.
@@ -2708,6 +2708,7 @@ Message  1 --- * Part             (one Message contains many Parts)
 | `POST /` | `message/send` | Client -> Server | Synchronous message execution; returns completed Task |
 | `POST /` | `message/stream` | Client -> Server | Streaming execution; returns SSE event stream |
 | `POST /` | `tasks/get` | Client -> Server | Retrieve task by ID |
+| `POST /` | `tasks/list` | Client -> Server | List stored tasks |
 | `POST /` | `tasks/cancel` | Client -> Server | Cancel in-flight task |
 | `POST /` | `tasks/resubscribe` | Client -> Server | Reconnect to active task SSE stream |
 | `POST /` | `tasks/pushNotificationConfig/set` | Client -> Server | Register webhook URL |
@@ -2967,11 +2968,12 @@ The system consumes A2A types, JSON-RPC handling, and SSE utilities from the `a2
 | `message/send` | `{message, metadata, contextId?}` | Task | Synchronous message execution |
 | `message/stream` | `{message, metadata, contextId?}` | SSE stream | Streaming execution |
 | `tasks/get` | `{id}` | Task | Retrieve task by ID |
+| `tasks/list` | `{}` | Task[] | List stored tasks |
 | `tasks/cancel` | `{id}` | Task | Cancel in-flight task |
 | `tasks/resubscribe` | `{id}` | SSE stream | Reconnect to task stream |
-| `tasks/pushNotificationConfig/set` | `{taskId, url}` | PushNotificationConfig | Register webhook |
-| `tasks/pushNotificationConfig/get` | `{taskId}` | PushNotificationConfig | Get webhook config |
-| `tasks/pushNotificationConfig/delete` | `{taskId}` | void | Remove webhook |
+| `tasks/pushNotificationConfig/set` | `{id, pushNotificationConfig: {url, ...}}` | PushNotificationConfig | Register webhook |
+| `tasks/pushNotificationConfig/get` | `{id}` | PushNotificationConfig | Get webhook config |
+| `tasks/pushNotificationConfig/delete` | `{id}` | void | Remove webhook |
 
 **A2A Error Codes:**
 
@@ -3032,7 +3034,7 @@ apcore Registry                       A2A Agent Card
 (config) project.name           -->   AgentCard.name
 (config) project.description    -->   AgentCard.description
 (config) project.version        -->   AgentCard.version
-(serve url)                     -->   AgentCard.url
+(serve url)                     -->   AgentCard.supportedInterfaces[0].url
 (computed from modules)         -->   AgentCard.skills[]
 (computed from annotations)     -->   AgentCard.capabilities
 (auth config)                   -->   AgentCard.securitySchemes[]

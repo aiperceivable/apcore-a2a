@@ -240,9 +240,9 @@ apcore-a2a's unique advantages:
 
 **Acceptance Criteria:**
 - `GET /.well-known/agent-card.json` returns a JSON document conforming to the A2A 1.0 Agent Card schema.
-- The Agent Card includes `name`, `description`, `version`, `url`, `skills[]`, `capabilities`.
+- The Agent Card includes `name`, `description`, `version`, `supportedInterfaces[]` (carrying the server `url`), `skills[]`, `capabilities`.
 - Each Skill includes `id`, `description`, `tags`, and `examples` derived from apcore module metadata.
-- `capabilities.streaming` is `true` if any module supports streaming.
+- `capabilities.streaming` is `true` unconditionally, since the apcore Executor's streaming path is always available.
 - `capabilities.pushNotifications` is `true` if push notification support is configured.
 - Task history is recorded when the task store supports it. (A2A 1.0 removed the 0.3 `capabilities.stateTransitionHistory` flag; history is no longer advertised as a capability.)
 
@@ -514,7 +514,7 @@ serve(registry)
 | `(config) project.name` | `AgentCard.name` (fallback: `"apcore-agent"`) |
 | `(config) project.description` | `AgentCard.description` (fallback: auto-generated summary) |
 | `(config) project.version` | `AgentCard.version` (fallback: `"0.0.0"`) |
-| `(serve url)` | `AgentCard.url` |
+| `(serve url)` | `AgentCard.supportedInterfaces[0].url` |
 | `(computed from modules)` | `AgentCard.skills[]` |
 | `(computed from annotations)` | `AgentCard.capabilities` |
 | `(auth config)` | `AgentCard.securitySchemes[]` |
@@ -528,9 +528,9 @@ serve(registry)
 2. `AgentCard.name` populated from Registry config `project.name`; fallback to `"apcore-agent"` if not configured.
 3. `AgentCard.description` populated from Registry config `project.description`; fallback to auto-generated description listing module count.
 4. `AgentCard.version` populated from Registry config `project.version`; fallback to `"0.0.0"`.
-5. `AgentCard.url` populated from the server's bound address (scheme + host + port).
+5. `AgentCard.supportedInterfaces[0].url` populated from the server's bound address (scheme + host + port). (A2A 1.0 removed the top-level `AgentCard.url` field; the server address is exposed via `supportedInterfaces[]`.)
 6. `AgentCard.skills[]` populated from module definitions (see FR-003).
-7. `AgentCard.capabilities.streaming` set to `true` if any registered module supports streaming.
+7. `AgentCard.capabilities.streaming` set to `true` unconditionally, since the apcore Executor's streaming path is always available.
 8. `AgentCard.capabilities.pushNotifications` set to `true` if push notifications are enabled via configuration.
 9. Task store records state-transition history when supported. (The 0.3 `AgentCard.capabilities.stateTransitionHistory` flag was removed in A2A 1.0.)
 10. `GET /.well-known/agent-card.json` returns HTTP 200 with `Content-Type: application/json`.
@@ -755,7 +755,7 @@ serve(registry)
 5. For streaming-capable modules (`Executor.stream()`), intermediate output chunks produce `TaskArtifactUpdateEvent` with `append: true`.
 6. For non-streaming modules, the stream emits status updates only (submitted --> working --> completed/failed).
 7. The final event is always a `TaskStatusUpdateEvent` with a terminal state (completed, failed, or canceled).
-8. Client disconnection terminates the stream and optionally cancels the task (configurable via `cancel_on_disconnect`).
+8. Client disconnection terminates the stream. The `cancel_on_disconnect` parameter is deprecated and has no effect: the underlying a2a-sdk `DefaultRequestHandler` does not support disabling disconnect-driven cancellation.
 9. `tasks/resubscribe` allows reconnecting to an active task's event stream.
 10. SSE events include an `id` field for resumability.
 
@@ -1338,7 +1338,7 @@ apcore Registry                       A2A Agent Card
 (config) project.name           -->   AgentCard.name
 (config) project.description    -->   AgentCard.description
 (config) project.version        -->   AgentCard.version
-(serve url)                     -->   AgentCard.url
+(serve url)                     -->   AgentCard.supportedInterfaces[0].url
 (computed from modules)         -->   AgentCard.skills[]
 (computed from annotations)     -->   AgentCard.capabilities
 (auth config)                   -->   AgentCard.securitySchemes[]

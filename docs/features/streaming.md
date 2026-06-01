@@ -5,7 +5,7 @@
 | Feature ID | F-04 |
 | Name | streaming |
 | Priority | P0 |
-| SRS Refs | FR-MSG-002, FR-MSG-005, FR-MSG-006, FR-TSK-007 |
+| SRS Refs | FR-MSG-002, FR-MSG-005, FR-MSG-006 |
 | Tech Design | §4.4.5 StreamingHandler |
 | Depends On | F-03 (server-core — TaskManager, ExecutionRouter) |
 | Blocks | F-08 (public-api) |
@@ -100,9 +100,10 @@ async def _stream_generator(task_id, queue, params, identity):
         # Send keepalive comment
         yield ": keepalive\n\n"
     except GeneratorExit:
-        # Client disconnected
-        if cancel_on_disconnect:
-            await task_manager.cancel_task(task_id)
+        # Client disconnected. `cancel_on_disconnect` is a deprecated no-op
+        # (a2a-sdk's DefaultRequestHandler does not support disabling
+        # disconnect-driven cancellation), so no explicit cancel is issued here.
+        pass
     finally:
         await task_manager.unsubscribe(task_id, queue)
         bg_task.cancel()
@@ -176,7 +177,7 @@ src/apcore_a2a/server/
 
 - First SSE event (`statusUpdate` with `TASK_STATE_SUBMITTED`) emitted within 50ms of request receipt
 - The last event is always a terminal `statusUpdate` (`TASK_STATE_COMPLETED` / `TASK_STATE_FAILED` / `TASK_STATE_CANCELED` / `TASK_STATE_REJECTED`); A2A 1.0 has no `final` flag
-- Client disconnect with `cancel_on_disconnect=True` triggers task cancellation (cooperatively via apcore `CancelToken`)
+- `cancel_on_disconnect` is a deprecated no-op (a2a-sdk's `DefaultRequestHandler` does not support disabling disconnect-driven cancellation); disconnect-cancel behavior is governed by the SDK
 - Long-running streams are bounded by apcore's `global_deadline` (mapped from `execution_timeout`); on expiry the stream ends with a failed `statusUpdate`
 - Keepalive every 30s for long-running tasks
 - `event_id` is monotonically increasing per-task

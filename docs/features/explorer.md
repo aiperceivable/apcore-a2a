@@ -55,7 +55,7 @@ The single-file UI provides:
 
 ### Agent Card Panel
 - Agent name, description, version, URL
-- Capabilities: streaming, push notifications, state history
+- Capabilities: streaming, push notifications
 - Security schemes listing
 
 ### Skills Browser

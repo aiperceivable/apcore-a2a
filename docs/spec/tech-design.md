@@ -517,19 +517,21 @@ class ErrorMapper:
 
 **Error mapping table (complete):**
 
-| apcore Exception | JSON-RPC Code | Message | `data.type` | Sanitized |
-|-----------------|:---:|---------|------------|:---------:|
-| `ModuleNotFoundError` | -32601 | `"Skill not found: {module_id}"` | `"ModuleNotFoundError"` | No |
-| `SchemaValidationError` | -32602 | `"Invalid params"` | `"SchemaValidationError"` | No (field details in `data.errors`) |
-| `ACLDeniedError` | -32001 | `"Task not found"` | `"TaskNotFoundError"` | Yes (masking true type) |
-| `ModuleExecuteError` | -32603 | `"Internal error"` | `"ModuleExecuteError"` | Yes |
-| `ModuleTimeoutError` | -32603 | `"Execution timed out"` | `"ModuleTimeoutError"` | Yes |
-| `InvalidInputError` | -32602 | `"Invalid input: {description}"` | `"InvalidInputError"` | No |
-| `CallDepthExceededError` | -32603 | `"Safety limit exceeded"` | `"CallDepthExceededError"` | Yes |
-| `CircularCallError` | -32603 | `"Safety limit exceeded"` | `"CircularCallError"` | Yes |
-| `CallFrequencyExceededError` | -32603 | `"Safety limit exceeded"` | `"CallFrequencyExceededError"` | Yes |
-| `ApprovalPendingError` | N/A | N/A (task transitions to `input_required`) | N/A | N/A |
-| Unknown `Exception` | -32603 | `"Internal error"` | `"InternalError"` | Yes |
+> The JSON-RPC error object is `{code, message}` only; no `data` field is emitted in v0.4. The error type is not exposed to clients.
+
+| apcore Exception | JSON-RPC Code | Message | Sanitized |
+|-----------------|:---:|---------|:---------:|
+| `ModuleNotFoundError` | -32601 | `"Skill not found: {module_id}"` | No |
+| `SchemaValidationError` | -32602 | `"Invalid params"` (field details in message) | No |
+| `ACLDeniedError` | -32001 | `"Task not found"` | Yes (masking true type) |
+| `ModuleExecuteError` | -32603 | `"Internal error"` | Yes |
+| `ModuleTimeoutError` | -32603 | `"Execution timed out"` | Yes |
+| `InvalidInputError` | -32602 | `"Invalid input: {description}"` | No |
+| `CallDepthExceededError` | -32603 | `"Safety limit exceeded"` | Yes |
+| `CircularCallError` | -32603 | `"Safety limit exceeded"` | Yes |
+| `CallFrequencyExceededError` | -32603 | `"Safety limit exceeded"` | Yes |
+| `ApprovalPendingError` | N/A | N/A (task transitions to `input_required`) | N/A |
+| Unknown `Exception` | -32603 | `"Internal error"` | Yes |
 
 **Sanitization rules:**
 1. Strip any substring matching a file path pattern (`/.../.../...`).
@@ -557,12 +559,13 @@ class PartConverter:
 
         Logic:
         1. If parts is empty, raise ValueError("Message must contain at least one Part").
-        2. Find the first Part matching the skill's declared inputModes.
+        2. Exactly one Part is accepted; if more than one Part is present, raise
+           ValueError("Multiple parts are not supported; expected exactly one Part").
         3. For DataPart with mediaType 'application/json': return data dict directly.
         4. For TextPart when input_schema root type is 'string': return text string.
         5. For TextPart when input_schema root type is 'object': attempt JSON parse.
            - On parse failure: raise ValueError("Invalid JSON in TextPart").
-        6. For FilePart: return dict with keys uri, name, mimeType.
+        6. FilePart is not supported: raise ValueError("FilePart is not supported").
         """
 
     def output_to_parts(self, output: object) -> list[dict]:
@@ -572,11 +575,9 @@ class PartConverter:
         1. If output is None: return [] (empty parts list).
         2. If output is dict: return [DataPart(data=output, mediaType="application/json")].
         3. If output is str: return [TextPart(text=output)].
-        4. If output contains bytes: return [FilePart(...)].
+        4. If output is list: return [TextPart(text=json.dumps(output))].
+        5. Any other type: return [TextPart(text=str(output))].
         """
-
-    def _detect_media_type(self, data: bytes) -> str:
-        """Detect MIME type from bytes content using magic bytes."""
 ```
 
 ### 4.4 Server Module (`server/`)
@@ -954,8 +955,8 @@ class PushNotificationManager:
         """Register webhook URL for task push notifications.
 
         Validation:
-        1. params.taskId required; return -32602 if missing.
-        2. params.url required; return -32602 if missing.
+        1. params.id required; return -32602 if missing.
+        2. params.pushNotificationConfig.url required; return -32602 if missing.
         3. URL must be well-formed; return -32602 if invalid.
         4. In production mode: URL must be HTTPS; reject HTTP with -32602.
         5. In production mode: reject loopback (127.0.0.1, ::1, localhost)
@@ -1629,8 +1630,10 @@ data: {"statusUpdate":{"taskId":"task-uuid","contextId":"ctx-uuid","status":{"st
   "id": "req-006",
   "method": "tasks/pushNotificationConfig/set",
   "params": {
-    "taskId": "task-uuid",
-    "url": "https://hooks.example.com/a2a"
+    "id": "task-uuid",
+    "pushNotificationConfig": {
+      "url": "https://hooks.example.com/a2a"
+    }
   }
 }
 ```
@@ -1639,10 +1642,11 @@ data: {"statusUpdate":{"taskId":"task-uuid","contextId":"ctx-uuid","status":{"st
 
 | Parameter | Type | Required | Validation | Error on failure |
 |-----------|------|:--------:|------------|-----------------|
-| `params.taskId` | string | Yes | Must be non-empty; task must exist | -32602 if missing; -32001 if task not found |
-| `params.url` | string (URL) | Yes | Well-formed URL; HTTPS in production; no loopback/private IPs in production | -32602 with specific message |
+| `params.id` | string | Yes | Must be non-empty; task must exist | -32602 if missing; -32001 if task not found |
+| `params.pushNotificationConfig` | object | Yes | Must be present | -32602 if missing |
+| `params.pushNotificationConfig.url` | string (URL) | Yes | Well-formed URL; HTTPS in production; no loopback/private IPs in production | -32602 with specific message |
 
-**Response**: `{"taskId": "...", "url": "...", "status": "active"}`.
+**Response**: `{"taskId": "...", "pushNotificationConfig": {"url": "...", ...}}`.
 
 ---
 
@@ -1655,7 +1659,7 @@ data: {"statusUpdate":{"taskId":"task-uuid","contextId":"ctx-uuid","status":{"st
   "jsonrpc": "2.0",
   "id": "req-007",
   "method": "tasks/pushNotificationConfig/get",
-  "params": {"taskId": "task-uuid"}
+  "params": {"id": "task-uuid"}
 }
 ```
 
@@ -1672,7 +1676,7 @@ data: {"statusUpdate":{"taskId":"task-uuid","contextId":"ctx-uuid","status":{"st
   "jsonrpc": "2.0",
   "id": "req-008",
   "method": "tasks/pushNotificationConfig/delete",
-  "params": {"taskId": "task-uuid"}
+  "params": {"id": "task-uuid"}
 }
 ```
 
@@ -2100,11 +2104,11 @@ sequenceDiagram
 
     Note over Client: Register webhook for this task
 
-    Client->>Transport: pushNotificationConfig/set {taskId:task1, url:"https://hooks.example.com/a2a"}
+    Client->>Transport: pushNotificationConfig/set {id:task1, pushNotificationConfig:{url:"https://hooks.example.com/a2a"}}
     Transport->>PushMgr: set_config(params)
     PushMgr->>PushMgr: Validate URL (HTTPS, no loopback)
     PushMgr->>Store: save_push_config(task1, config)
-    PushMgr-->>Client: {taskId:task1, url:"...", status:"active"}
+    PushMgr-->>Client: {taskId:task1, pushNotificationConfig:{url:"..."}}
 
     Note over Router,Executor: Task execution proceeds
 
@@ -2309,15 +2313,12 @@ All JSON-RPC errors follow this structure:
   "id": "req-001",
   "error": {
     "code": -32603,
-    "message": "Internal error",
-    "data": {
-      "type": "ModuleExecuteError"
-    }
+    "message": "Internal error"
   }
 }
 ```
 
-The `data.type` field enables programmatic error handling by clients without parsing the human-readable `message`.
+The JSON-RPC error object is `{code, message}` only; no `data` field is emitted in v0.4. Clients dispatch on the numeric `code`.
 
 ### 9.13 Config Bus Namespace
 

@@ -288,7 +288,7 @@ def _error_response(id, code, message, data=None):
 
 **Health:**
 ```json
-{"status": "ok", "module_count": 5, "uptime_seconds": 3600}
+{"status": "healthy", "module_count": 5, "uptime_seconds": 3600, "version": "1.0.0"}
 ```
 
 ## Actual Implementation
