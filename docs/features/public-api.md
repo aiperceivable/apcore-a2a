@@ -66,6 +66,7 @@ def serve(
     shutdown_timeout: int = 30,
     execution_timeout: int = 300,
     metrics: bool = False,
+    sys_modules: bool = False,
     log_level: str | None = None,
 ) -> None:
     """Launch a compliant A2A agent server. Blocks until shutdown.
@@ -88,6 +89,8 @@ def serve(
         shutdown_timeout: Seconds to wait for graceful shutdown. Default: 30.
         execution_timeout: Seconds before task execution times out. Can also be set via APCORE_A2A_EXECUTION_TIMEOUT environment variable. Default: 300.
         metrics: Enable GET /metrics endpoint. Default: False.
+        sys_modules: Register apcore sys.* modules (health/usage/manifest) and
+            wire observability middleware. Default: False.
         log_level: Logging level ("debug","info","warning","error"). Default: "info".
 
     Raises:
@@ -163,6 +166,7 @@ async def async_serve(
     cancel_on_disconnect: bool = True,
     execution_timeout: int = 300,
     metrics: bool = False,
+    sys_modules: bool = False,
 ) -> Starlette:
     """Build and return a configured Starlette ASGI app. Does NOT start uvicorn.
 

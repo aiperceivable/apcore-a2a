@@ -77,7 +77,7 @@ apcore modules carry rich, machine-readable metadata -- `input_schema`, `output_
 
 The Agent-to-Agent (A2A) protocol, originated by Google and now governed by the Linux Foundation, defines a standard for AI agents to discover, communicate, and delegate tasks to one another. Key protocol elements:
 
-- **Agent Card** (`/.well-known/agent.json`): JSON document declaring an agent's identity, capabilities, skills, and security schemes.
+- **Agent Card** (`/.well-known/agent-card.json`): JSON document declaring an agent's identity, capabilities, skills, and security schemes.
 - **JSON-RPC 2.0 binding**: All operations (`message/send`, `message/stream`, `tasks/*`) are dispatched via `POST /` with JSON-RPC 2.0 payloads.
 - **Task lifecycle**: Stateful work units with states `submitted`, `working`, `completed`, `failed`, `canceled`, `input_required`.
 - **SSE streaming**: `message/stream` returns `text/event-stream` with `TaskStatusUpdateEvent` and `TaskArtifactUpdateEvent`.
@@ -393,12 +393,13 @@ class AgentCardBuilder:
 3. Skip modules with empty or `None` description; log warning: `"Skipping module {module_id}: missing description"`.
 4. Convert each descriptor to a Skill via `SkillMapper.to_skill(descriptor)`.
 5. Separate public skills (no ACL restriction, no `requires_approval`) from restricted skills.
-6. Compute capabilities:
-   - `streaming`: `True` if any module's Executor supports `stream()`.
+6. Compute capabilities (A2A 1.0 `AgentCapabilities`):
+   - `streaming`: `True` (executor streaming is always available; non-streaming modules fall back to a single chunk).
    - `pushNotifications`: from configuration parameter.
-   - `stateTransitionHistory`: `True` if task store supports history.
-7. Construct Agent Card dict with fields: `name`, `description`, `version`, `url`, `skills`, `capabilities`, `defaultInputModes: ["application/json"]`, `defaultOutputModes: ["application/json"]`.
-8. If `security_schemes` provided, add `securitySchemes` field.
+   - `extensions`: `[]` (A2A protocol extensions; none by default).
+   - `extendedAgentCard`: `True` if security schemes are configured. (A2A 1.0 removed the 0.3 `stateTransitionHistory` capability; task history is still recorded by stores that support it, it is simply no longer advertised as a capability flag.)
+7. Construct the A2A 1.0 Agent Card with fields: `name`, `description`, `version`, `supportedInterfaces` (`[{url, protocolBinding:"JSONRPC", protocolVersion:"1.0", tenant:""}]`, replacing the 0.3 top-level `url`), `provider`, `skills`, `capabilities`, `defaultInputModes`, `defaultOutputModes`, `securitySchemes`, `securityRequirements`, `signatures`.
+8. If `security_schemes` provided, populate the `securitySchemes` map.
 9. Cache the card in memory. Return the cached dict (not a copy -- immutable after build).
 
 **Agent Card response headers:**
@@ -641,13 +642,13 @@ class A2AServerFactory:
 5. Create `StreamingHandler(task_manager)`.
 6. Optionally create `PushNotificationManager(task_store)`.
 7. Build Starlette routes:
-   - `GET /.well-known/agent.json` -> serve Agent Card
+   - `GET /.well-known/agent-card.json` -> serve Agent Card
    - `POST /` -> JSON-RPC dispatch
    - `GET /health` -> health check
    - `GET /metrics` -> metrics (if enabled)
    - `GET /agent/authenticatedExtendedCard` -> extended card (if auth configured)
 8. Optionally mount Explorer UI at `explorer_prefix`.
-9. Apply `AuthMiddleware` if `auth` is provided, with exempt paths: `{"/.well-known/agent.json", "/health", "/metrics"}`.
+9. Apply `AuthMiddleware` if `auth` is provided, with exempt paths: `{"/.well-known/agent-card.json", "/health", "/metrics"}`.
 10. Apply CORS middleware if `cors_origins` is provided.
 
 #### 4.4.2 `ExecutionRouter`
@@ -855,7 +856,7 @@ class TransportManager:
         """
 
     async def handle_agent_card(self, request: Request) -> JSONResponse:
-        """GET /.well-known/agent.json -- serve pre-computed Agent Card."""
+        """GET /.well-known/agent-card.json -- serve pre-computed Agent Card."""
 
     async def handle_extended_card(self, request: Request) -> JSONResponse:
         """GET /agent/authenticatedExtendedCard -- serve extended card.
@@ -933,16 +934,16 @@ class StreamingHandler:
 
 ```
 id: 1
-data: {"type":"TaskStatusUpdateEvent","taskId":"abc-123","status":{"state":"submitted","timestamp":"2026-03-03T10:00:00Z"}}
+data: {"statusUpdate":{"taskId":"abc-123","status":{"state":"TASK_STATE_SUBMITTED","timestamp":"2026-03-03T10:00:00Z"}}}
 
 id: 2
-data: {"type":"TaskStatusUpdateEvent","taskId":"abc-123","status":{"state":"working","timestamp":"2026-03-03T10:00:00.050Z"}}
+data: {"statusUpdate":{"taskId":"abc-123","status":{"state":"TASK_STATE_WORKING","timestamp":"2026-03-03T10:00:00.050Z"}}}
 
 id: 3
-data: {"type":"TaskArtifactUpdateEvent","taskId":"abc-123","artifact":{"parts":[{"type":"data","data":{"progress":50},"mediaType":"application/json"}],"index":0,"append":true}}
+data: {"artifactUpdate":{"taskId":"abc-123","artifact":{"artifactId":"art-001","parts":[{"data":{"progress":50}}]},"append":true,"lastChunk":false}}
 
 id: 4
-data: {"type":"TaskStatusUpdateEvent","taskId":"abc-123","status":{"state":"completed","timestamp":"2026-03-03T10:00:05Z"},"artifacts":[...]}
+data: {"statusUpdate":{"taskId":"abc-123","status":{"state":"TASK_STATE_COMPLETED","timestamp":"2026-03-03T10:00:05Z"}}}
 
 ```
 
@@ -1112,7 +1113,7 @@ class AgentCardFetcher:
         ttl: float = 300.0,
     ) -> None:
         self._http = http
-        self._url = f"{base_url}/.well-known/agent.json"
+        self._url = f"{base_url}/.well-known/agent-card.json"
         self._ttl = ttl
         self._cached: dict | None = None
         self._cached_at: float = 0.0
@@ -1223,7 +1224,7 @@ class AuthMiddleware:
         """ASGI middleware entry point.
 
         1. Skip non-HTTP scopes.
-        2. Skip exempt paths (/.well-known/agent.json, /health, /metrics).
+        2. Skip exempt paths (/.well-known/agent-card.json, /health, /metrics).
         3. Extract headers, call authenticator.authenticate(headers).
         4. If None and require_auth: send 401 with WWW-Authenticate: Bearer.
         5. Set auth_identity_var ContextVar.
@@ -1232,7 +1233,7 @@ class AuthMiddleware:
         """
 ```
 
-Default exempt paths: `{"/.well-known/agent.json", "/health", "/metrics"}`. Explorer prefix is added to exempt prefixes when explorer is enabled.
+Default exempt paths: `{"/.well-known/agent-card.json", "/health", "/metrics"}`. Explorer prefix is added to exempt prefixes when explorer is enabled.
 
 ### 4.7 Storage Module (`storage/`)
 
@@ -1418,7 +1419,7 @@ All JSON-RPC methods are dispatched via `POST /` with `Content-Type: application
     "message": {
       "role": "user",
       "parts": [
-        {"type": "text", "text": "resize to 800x600"}
+        {"text": "resize to 800x600"}
       ]
     },
     "metadata": {
@@ -1435,7 +1436,7 @@ All JSON-RPC methods are dispatched via `POST /` with `Content-Type: application
 |-----------|------|:--------:|------------|-----------------|
 | `params.message` | object | Yes | Must contain `role` (string) and `parts` (non-empty array) | -32602: `"Missing required parameter: message"` |
 | `params.message.role` | string | Yes | Must be `"user"` | -32602: `"Invalid message role: {role}"` |
-| `params.message.parts` | array | Yes | At least one Part object; each Part must have `type` field | -32602: `"Message must contain at least one Part"` |
+| `params.message.parts` | array | Yes | At least one Part object; each Part carries one A2A 1.0 oneof content (`text` / `data` / file) | -32602: `"Message must contain at least one Part"` |
 | `params.metadata` | object | No | If present, may contain `skillId` | -- |
 | `params.metadata.skillId` | string | Yes | Must match a registered module_id | -32602 if missing: `"Missing required parameter: metadata.skillId"`; -32601 if unknown: `"Skill not found: {skillId}"` |
 | `params.contextId` | string (UUID) | No | If provided, must be valid UUID v4 format | -32602: `"Invalid contextId format"` |
@@ -1450,19 +1451,19 @@ All JSON-RPC methods are dispatched via `POST /` with `Content-Type: application
     "id": "task-uuid",
     "contextId": "ctx-uuid",
     "status": {
-      "state": "completed",
+      "state": "TASK_STATE_COMPLETED",
       "message": null,
       "timestamp": "2026-03-03T10:00:05Z"
     },
     "artifacts": [
       {
-        "parts": [{"type": "data", "data": {"width": 800, "height": 600}, "mediaType": "application/json"}],
-        "index": 0
+        "artifactId": "art-001",
+        "parts": [{"data": {"width": 800, "height": 600}}]
       }
     ],
     "history": [
-      {"state": "submitted", "timestamp": "2026-03-03T10:00:00Z"},
-      {"state": "working", "timestamp": "2026-03-03T10:00:00.050Z"}
+      {"state": "TASK_STATE_SUBMITTED", "timestamp": "2026-03-03T10:00:00Z"},
+      {"state": "TASK_STATE_WORKING", "timestamp": "2026-03-03T10:00:00.050Z"}
     ]
   }
 }
@@ -1494,16 +1495,16 @@ All JSON-RPC methods are dispatched via `POST /` with `Content-Type: application
 
 ```
 id: 1
-data: {"type":"TaskStatusUpdateEvent","taskId":"task-uuid","contextId":"ctx-uuid","status":{"state":"submitted","timestamp":"2026-03-03T10:00:00Z"}}
+data: {"statusUpdate":{"taskId":"task-uuid","contextId":"ctx-uuid","status":{"state":"TASK_STATE_SUBMITTED","timestamp":"2026-03-03T10:00:00Z"}}}
 
 id: 2
-data: {"type":"TaskStatusUpdateEvent","taskId":"task-uuid","contextId":"ctx-uuid","status":{"state":"working","timestamp":"2026-03-03T10:00:00.050Z"}}
+data: {"statusUpdate":{"taskId":"task-uuid","contextId":"ctx-uuid","status":{"state":"TASK_STATE_WORKING","timestamp":"2026-03-03T10:00:00.050Z"}}}
 
 id: 3
-data: {"type":"TaskArtifactUpdateEvent","taskId":"task-uuid","artifact":{"parts":[{"type":"data","data":{"progress":50},"mediaType":"application/json"}],"index":0,"append":true}}
+data: {"artifactUpdate":{"taskId":"task-uuid","artifact":{"artifactId":"art-001","parts":[{"data":{"progress":50}}]},"append":true,"lastChunk":false}}
 
 id: 4
-data: {"type":"TaskStatusUpdateEvent","taskId":"task-uuid","contextId":"ctx-uuid","status":{"state":"completed","timestamp":"2026-03-03T10:00:05Z"},"artifacts":[{"parts":[{"type":"data","data":{"width":800,"height":600},"mediaType":"application/json"}],"index":0}]}
+data: {"statusUpdate":{"taskId":"task-uuid","contextId":"ctx-uuid","status":{"state":"TASK_STATE_COMPLETED","timestamp":"2026-03-03T10:00:05Z"}}}
 
 ```
 
@@ -1693,7 +1694,7 @@ data: {"type":"TaskStatusUpdateEvent","taskId":"task-uuid","contextId":"ctx-uuid
 
 ### 5.2 REST Endpoints
 
-#### `GET /.well-known/agent.json`
+#### `GET /.well-known/agent-card.json`
 
 - **Auth**: Not required.
 - **Response**: HTTP 200, `Content-Type: application/json`, `Cache-Control: max-age=300`.
@@ -1792,13 +1793,16 @@ Convenience alias for `await client.agent_card`.
 | `lastChunk` | bool | Optional | Final chunk of streaming artifact |
 | `name` | string | Optional | Artifact name |
 
-#### Part (Union Type)
+#### Part (A2A 1.0 `oneof` content)
 
-**TextPart**: `{"type": "text", "text": "<content>"}`
+A2A 1.0 `Part` is a protobuf `oneof` — exactly one content case, serialized flat
+on the wire (no `type` discriminator):
 
-**DataPart**: `{"type": "data", "data": {<structured>}, "mediaType": "application/json"}`
+**Text**: `{"text": "<content>"}`
 
-**FilePart**: `{"type": "file", "uri": "<uri>", "name": "<filename>", "mimeType": "<mime>"}`
+**Data**: `{"data": {<structured>}}`
+
+**File**: `{"raw": "<base64-bytes>"}` or `{"url": "<uri>"}` (with optional `filename` / `mediaType`)
 
 #### AgentCard
 
@@ -2064,7 +2068,7 @@ sequenceDiagram
     App->>Client: await client.agent_card
 
     Client->>Fetcher: fetch()
-    Fetcher->>Remote: GET https://agent.example.com/.well-known/agent.json
+    Fetcher->>Remote: GET https://agent.example.com/.well-known/agent-card.json
     Remote-->>Fetcher: 200 OK {name, skills, capabilities, ...}
     Fetcher->>Fetcher: Cache card (TTL: 5 min)
     Fetcher-->>Client: agent_card dict
@@ -2732,7 +2736,7 @@ services:
 
 **Phase 1: Core (Week 1-3)**
 - Implement: `adapters/` (all five adapters), `server/factory.py`, `server/router.py`, `server/task_manager.py`, `server/transport.py`, `storage/` (protocol + InMemoryTaskStore), `__init__.py` (serve/async_serve).
-- Deliverables: Working `serve(registry)` with `message/send`, `tasks/get`, `tasks/cancel`, `tasks/list`, Agent Card at `/.well-known/agent.json`.
+- Deliverables: Working `serve(registry)` with `message/send`, `tasks/get`, `tasks/cancel`, `tasks/list`, Agent Card at `/.well-known/agent-card.json`.
 - SRS coverage: FR-SRV-*, FR-AGC-001/002/003, FR-SKL-*, FR-MSG-001/003/004, FR-TSK-*, FR-EXE-001/002, FR-ERR-*, FR-STR-*.
 - Test target: ~200 tests (unit + integration for core components).
 
@@ -2897,7 +2901,7 @@ All client-provided strings in log messages are truncated to 1,000 characters an
 | `tasks/pushNotificationConfig/set` | FR-PSH-001 |
 | `tasks/pushNotificationConfig/get` | FR-PSH-004 |
 | `tasks/pushNotificationConfig/delete` | FR-PSH-004 |
-| `GET /.well-known/agent.json` | FR-AGC-003 |
+| `GET /.well-known/agent-card.json` | FR-AGC-003 |
 | `GET /agent/authenticatedExtendedCard` | FR-AGC-004 |
 | `GET /health` | FR-OPS-001 |
 | `GET /metrics` | FR-OPS-002 |

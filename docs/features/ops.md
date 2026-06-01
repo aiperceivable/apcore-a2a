@@ -172,7 +172,7 @@ def invalidate_cache(self) -> None:
     self._cached_extended_card = None
 ```
 
-After invalidation, the next `GET /.well-known/agent.json` call triggers a full rebuild from the registry.
+After invalidation, the next `GET /.well-known/agent-card.json` call triggers a full rebuild from the registry.
 
 ### Agent Card Hot-Swap
 

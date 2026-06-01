@@ -129,7 +129,7 @@ apcore-a2a (this project -- A2A protocol)
 1. Maya writes apcore modules (same as before).
 2. Maya runs `pip install apcore-a2a`.
 3. Maya adds 3 lines of code: import, create registry, call `serve(registry)`.
-4. Agent Card is automatically served at `/.well-known/agent.json`. All modules appear as Skills.
+4. Agent Card is automatically served at `/.well-known/agent-card.json`. All modules appear as Skills.
 5. Other agents discover and invoke Maya's modules via standard A2A protocol.
 6. When Maya updates a module schema, the Agent Card automatically reflects the change on next restart.
 
@@ -226,7 +226,7 @@ apcore-a2a's unique advantages:
 
 **Acceptance Criteria:**
 - `serve(registry)` starts an HTTP server on the default port (configurable via `host` and `port` parameters).
-- The server responds to `GET /.well-known/agent.json` with a valid A2A Agent Card.
+- The server responds to `GET /.well-known/agent-card.json` with a valid A2A Agent Card.
 - All registered modules appear as Skills in the Agent Card.
 - The server handles JSON-RPC 2.0 requests at the root endpoint.
 - The server shuts down cleanly on SIGINT/SIGTERM.
@@ -239,12 +239,12 @@ apcore-a2a's unique advantages:
 **So that** I can integrate it into my multi-agent workflow like any other A2A agent.
 
 **Acceptance Criteria:**
-- `GET /.well-known/agent.json` returns a JSON document conforming to A2A v0.3.0 Agent Card schema.
+- `GET /.well-known/agent-card.json` returns a JSON document conforming to the A2A 1.0 Agent Card schema.
 - The Agent Card includes `name`, `description`, `version`, `url`, `skills[]`, `capabilities`.
 - Each Skill includes `id`, `description`, `tags`, and `examples` derived from apcore module metadata.
 - `capabilities.streaming` is `true` if any module supports streaming.
 - `capabilities.pushNotifications` is `true` if push notification support is configured.
-- `capabilities.stateTransitionHistory` is `true` if the task store supports history.
+- Task history is recorded when the task store supports it. (A2A 1.0 removed the 0.3 `capabilities.stateTransitionHistory` flag; history is no longer advertised as a capability.)
 
 #### US-003: Synchronous Task Execution
 
@@ -306,7 +306,7 @@ apcore-a2a's unique advantages:
 
 **Acceptance Criteria:**
 - `A2AClient(url)` constructs a client pointing to a remote agent's base URL.
-- `client.agent_card` fetches and caches the Agent Card from `<url>/.well-known/agent.json`.
+- `client.agent_card` fetches and caches the Agent Card from `<url>/.well-known/agent-card.json`.
 - `client.send_message(message)` sends `message/send` and returns the Task.
 - `client.stream_message(message)` sends `message/stream` and returns an async iterator of events.
 - `client.get_task(task_id)` retrieves task status.
@@ -368,14 +368,14 @@ Flow:
        serve(Registry(extensions_dir="./extensions"))
   3. Server starts on port 8000 (default)
   4. Maya verifies Agent Card:
-       curl http://localhost:8000/.well-known/agent.json
+       curl http://localhost:8000/.well-known/agent-card.json
   5. Agent Card returns JSON with all 10 modules listed as Skills
   6. Maya tests a synchronous call:
        curl -X POST http://localhost:8000/ \
          -H "Content-Type: application/json" \
          -d '{"jsonrpc":"2.0","id":"1","method":"message/send",
               "params":{"message":{"role":"user",
-              "parts":[{"type":"text","text":"..."}]},
+              "parts":[{"text":"..."}]},
               "metadata":{"skillId":"image.resize"}}}'
   7. Response contains completed Task with module output as Artifact
 
@@ -396,7 +396,7 @@ Precondition: Multi-agent workflow with 3 agents (2 non-apcore, 1 apcore)
 Flow:
   1. Omar's orchestrator discovers agents via Agent Card URLs
   2. Orchestrator fetches apcore agent's Agent Card at
-       GET https://agent.example.com/.well-known/agent.json
+       GET https://agent.example.com/.well-known/agent-card.json
   3. Orchestrator parses Skills array and selects relevant capabilities
   4. Orchestrator sends message/send to apcore agent for data processing:
        {"method":"message/send","params":{
@@ -433,7 +433,7 @@ Flow:
            key="...",
            issuer="https://idp.corp.com",
            audience="apcore-agents"))
-  2. Agent Card at /.well-known/agent.json declares:
+  2. Agent Card at /.well-known/agent-card.json declares:
        "securitySchemes": [{"type": "http", "scheme": "bearer"}]
   3. Extended Agent Card at /agent/authenticatedExtendedCard
        includes additional privileged Skills not on public card
@@ -489,7 +489,7 @@ serve(registry)
 3. `serve(executor)` accepts an Executor instance (duck-typed: any object with `call_async()`, `stream()`, `validate()`).
 4. Optional keyword arguments: `name`, `description`, `version`, `url`, `auth`, `task_store`, `cors_origins`, `push_notifications`, `explorer`, `explorer_prefix`, `cancel_on_disconnect`, `shutdown_timeout`, `execution_timeout`, `log_level`, `metrics`.
 5. Server responds to A2A JSON-RPC 2.0 requests at the root path `/`.
-6. Server responds to Agent Card requests at `GET /.well-known/agent.json`.
+6. Server responds to Agent Card requests at `GET /.well-known/agent-card.json`.
 7. Server shuts down cleanly on SIGINT and SIGTERM signals.
 8. Function raises `ValueError` if the registry/executor has zero modules.
 9. `async_serve()` variant returns the ASGI application without starting uvicorn (for embedding in existing ASGI servers).
@@ -505,7 +505,7 @@ serve(registry)
 
 **Title:** Automatic A2A Agent Card construction from apcore Registry
 
-**Description:** Automatically construct a valid A2A Agent Card from apcore Registry metadata. The Agent Card is the discovery mechanism at `/.well-known/agent.json` that allows other agents and orchestrators to understand this agent's capabilities, skills, and security requirements.
+**Description:** Automatically construct a valid A2A Agent Card from apcore Registry metadata. The Agent Card is the discovery mechanism at `/.well-known/agent-card.json` that allows other agents and orchestrators to understand this agent's capabilities, skills, and security requirements.
 
 **Mapping:**
 
@@ -532,8 +532,8 @@ serve(registry)
 6. `AgentCard.skills[]` populated from module definitions (see FR-003).
 7. `AgentCard.capabilities.streaming` set to `true` if any registered module supports streaming.
 8. `AgentCard.capabilities.pushNotifications` set to `true` if push notifications are enabled via configuration.
-9. `AgentCard.capabilities.stateTransitionHistory` set to `true` if the task store supports history recording.
-10. `GET /.well-known/agent.json` returns HTTP 200 with `Content-Type: application/json`.
+9. Task store records state-transition history when supported. (The 0.3 `AgentCard.capabilities.stateTransitionHistory` flag was removed in A2A 1.0.)
+10. `GET /.well-known/agent-card.json` returns HTTP 200 with `Content-Type: application/json`.
 11. Agent Card is re-generated if modules are added/removed at runtime (when dynamic registration is enabled).
 
 **Dependencies:** FR-003
@@ -640,7 +640,7 @@ serve(registry)
 3. Invalid state transitions raise an internal error (logged at ERROR level, not exposed to client).
 4. Each Task object has: `id`, `contextId`, `status` (with `state`, `message`, `timestamp`), `artifacts[]`, `history[]`.
 5. `status.timestamp` is updated on every state transition (ISO 8601 format).
-6. `history[]` records all previous state transitions when `stateTransitionHistory` is enabled.
+6. `history[]` records all previous state transitions when the task store supports history recording.
 7. Task objects are stored in the configured task store (see FR-015; in-memory default).
 8. Concurrent access to a single task is thread-safe (atomic state transitions).
 
@@ -793,7 +793,7 @@ async for event in client.stream_message(message):
 
 **Acceptance Criteria:**
 1. `A2AClient(url)` constructs a client pointing to a remote agent's base URL.
-2. `client.agent_card` property fetches and caches the Agent Card from `<url>/.well-known/agent.json`.
+2. `client.agent_card` property fetches and caches the Agent Card from `<url>/.well-known/agent-card.json`.
 3. `client.send_message(message)` sends `message/send` JSON-RPC request and returns the Task.
 4. `client.stream_message(message)` sends `message/stream` and returns an async iterator of SSE events.
 5. `client.get_task(task_id)` sends `tasks/get` and returns the Task.
@@ -1066,7 +1066,7 @@ apcore-a2a serve --extensions-dir ./extensions --push-notifications
 
 | Metric | Target | Measurement Method |
 |--------|--------|-------------------|
-| Agent Card response time | < 10ms (p99) | Load test: 1,000 concurrent `GET /.well-known/agent.json` requests |
+| Agent Card response time | < 10ms (p99) | Load test: 1,000 concurrent `GET /.well-known/agent-card.json` requests |
 | `message/send` latency overhead | < 5ms above raw `Executor.call_async()` time | Benchmark: `message/send` vs direct Executor call on same module |
 | SSE first event latency | < 50ms after request receipt | Benchmark: time from `message/stream` request to first `TaskStatusUpdateEvent` |
 | Task store read latency | < 1ms for in-memory store | Benchmark: `tasks/get` under 10,000 stored tasks |
@@ -1245,7 +1245,7 @@ The investment (estimated 800-1,500 lines of core logic, following the proven ap
 | M1.2: Agent Card & Server | FR-001 (serve()), FR-002 (Agent Card), FR-015 (Task store) | Working server with Agent Card endpoint and in-memory task storage |
 | M1.3: Synchronous Execution | FR-004 (message/send), FR-005 (Task lifecycle), FR-006 (Execution routing) | Complete synchronous request-response path through Executor pipeline |
 
-**Phase 1 Exit Criteria:** `serve(registry)` starts a server; `GET /.well-known/agent.json` returns a valid Agent Card with all modules as Skills; `message/send` executes a module and returns a completed Task with correct Artifacts.
+**Phase 1 Exit Criteria:** `serve(registry)` starts a server; `GET /.well-known/agent-card.json` returns a valid Agent Card with all modules as Skills; `message/send` executes a module and returns a completed Task with correct Artifacts.
 
 ### Phase 2: Streaming & Tasks (Weeks 4-5)
 
@@ -1371,7 +1371,7 @@ apcore Annotations                    A2A Agent Card
 ========================              ========================
 any module has streaming=true   -->   capabilities.streaming = true
 push_notifications enabled      -->   capabilities.pushNotifications = true
-task store supports history     -->   capabilities.stateTransitionHistory = true
+task store supports history     -->   history recording enabled (no 1.0 capability flag)
 readonly annotation             -->   Skill.extensions.annotations.readonly
 destructive annotation          -->   Skill.extensions.annotations.destructive
 idempotent annotation           -->   Skill.extensions.annotations.idempotent
@@ -1554,7 +1554,7 @@ ApprovalPendingError(module_id)
 | Term | Definition |
 |------|-----------|
 | **A2A** | Agent-to-Agent protocol. Open standard by Google/Linux Foundation for inter-agent communication. Enables diverse AI agents to discover, communicate, and collaborate on tasks. |
-| **Agent Card** | JSON document describing an A2A agent's identity, capabilities, skills, and security schemes. Served at `/.well-known/agent.json` for standard discovery. |
+| **Agent Card** | JSON document describing an A2A agent's identity, capabilities, skills, and security schemes. Served at `/.well-known/agent-card.json` for standard discovery. |
 | **apcore** | Schema-driven module development framework. Protocol-agnostic core with adapter-based protocol support (MCP via apcore-mcp, A2A via apcore-a2a). |
 | **Artifact** | Output produced by an A2A task. Contains Parts (TextPart, DataPart, FilePart) representing the result of module execution. |
 | **contextId** | Unique identifier (UUID v4) grouping multiple messages into a multi-turn conversation. Enables stateful interactions and input elicitation. |

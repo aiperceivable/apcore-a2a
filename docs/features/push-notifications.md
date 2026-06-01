@@ -122,15 +122,15 @@ asyncio.create_task(push_manager.notify(task_id, event))
 
 ## Delivery Payload Format
 
-POST body is the same event dict emitted by SSE:
+POST body is the same A2A 1.0 event payload emitted by SSE — a `statusUpdate`
+oneof wrapper, camelCase fields, `TASK_STATE_*` enum state, and no `final` flag:
 ```json
 {
-  "type": "TaskStatusUpdateEvent",
-  "taskId": "abc-123",
-  "contextId": "ctx-xyz",
-  "status": {"state": "completed", "timestamp": "2026-03-03T10:00:05.000Z"},
-  "artifacts": [...],
-  "final": true
+  "statusUpdate": {
+    "taskId": "abc-123",
+    "contextId": "ctx-xyz",
+    "status": {"state": "TASK_STATE_COMPLETED", "timestamp": "2026-03-03T10:00:05.000Z"}
+  }
 }
 ```
 

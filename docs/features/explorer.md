@@ -160,7 +160,7 @@ src/apcore_a2a/explorer/
 - Explorer is mounted only when `explorer=True` in `serve()` / `A2AServerFactory.create()`
 - All Explorer routes are exempt from JWT authentication (public dev tool)
 - `index.html` is self-contained — no external network requests from the UI
-- Agent Card data served at `{explorer_prefix}/agent-card` (not re-fetching `/.well-known/agent.json` to avoid CORS)
+- Agent Card data served at `{explorer_prefix}/agent-card` (not re-fetching `/.well-known/agent-card.json` to avoid CORS)
 - `create_explorer_mount()` has no dependency on auth or storage modules
 
 ## Test Module

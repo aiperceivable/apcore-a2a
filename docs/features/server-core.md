@@ -66,11 +66,11 @@ class A2AServerFactory:
 6. Create `StreamingHandler(task_manager, router)`.
 7. If `push_notifications`: create `PushNotificationManager(task_store)`.
 8. Build Starlette routes:
-   - `GET /.well-known/agent.json` → Agent Card (no auth)
+   - `GET /.well-known/agent-card.json` → Agent Card (no auth); `GET /.well-known/agent.json` served as a 0.3 compat alias
    - `POST /` → JSON-RPC dispatch
    - `GET /health` → health check
    - `GET /agent/authenticatedExtendedCard` → extended card (if auth)
-9. Apply `AuthMiddleware` if auth provided. Exempt: `{"/.well-known/agent.json", "/health", "/metrics"}`.
+9. Apply `AuthMiddleware` if auth provided. Exempt: `{"/.well-known/agent-card.json", "/.well-known/agent.json", "/health", "/metrics"}`.
 10. Apply CORS middleware if `cors_origins` provided.
 11. Mount Explorer at `explorer_prefix` if `explorer=True`.
 
@@ -235,7 +235,7 @@ class TransportManager:
         """POST / — JSON-RPC 2.0 dispatch."""
 
     async def handle_agent_card(self, request: Request) -> JSONResponse:
-        """GET /.well-known/agent.json"""
+        """GET /.well-known/agent-card.json (and /.well-known/agent.json alias)"""
 
     async def handle_extended_card(self, request: Request) -> JSONResponse:
         """GET /agent/authenticatedExtendedCard"""

@@ -5,19 +5,26 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [0.4.0] - 2026-03-31
-
-### Added
-
-- **Rust implementation** (`apcore-a2a-rust`) — initial scaffold at v0.3.0 with adapters (ErrorMapper, AgentCardBuilder, SkillMapper, SchemaConverter, PartConverter), auth (JWT, middleware), server (factory, executor), client (A2AClient, AgentCardFetcher), storage (TaskStore), CLI, and builder pattern. Built on axum 0.8 with `apcore = "0.15"`.
-- **Error Formatter Registry** (§8.8) — Python and TypeScript SDKs register their `ErrorMapper` with `ErrorFormatterRegistry.register("a2a", ...)` so the ecosystem has a discoverable A2A error formatter.
-- **Config Bus namespace** (§9.13) — all three SDKs register the `apcore-a2a` namespace with env prefix `APCORE_A2A` and defaults for `execution_timeout`, `cors_origins`, `explorer`, `metrics`, `push_notifications`.
-- **New error codes** — `MODULE_DISABLED`, `CONFIG_NAMESPACE_DUPLICATE`, `CONFIG_MOUNT_ERROR`, `CONFIG_BIND_ERROR` handled in ErrorMapper across all languages.
+## [0.4.0] - 2026-06-01
 
 ### Changed
 
-- **`apcore` dependency** bumped from `0.14.0+` to `0.15.1+` in Python and TypeScript SDKs.
-- **Env prefix simplified** — `APCORE__A2A` (double underscore) → `APCORE_A2A` (single underscore), per apcore 0.15.1 convention change.
+- **A2A protocol upgraded 0.3 → 1.0 (BREAKING).** All language SDKs now target the protobuf-derived A2A 1.0 wire format:
+  - **Events** are a `oneof` discriminated by wrapper key (`task` / `statusUpdate` / `artifactUpdate` / `msg`) — the 0.3 `type`/`kind` discriminator and the `final` flag are removed. The stream now ends on a terminal `TaskState` (`TASK_STATE_COMPLETED` / `TASK_STATE_FAILED` / `TASK_STATE_CANCELED` / `TASK_STATE_REJECTED`).
+  - **`TaskState`** serializes as its full enum name (`TASK_STATE_SUBMITTED`, …); `Role` is an enum (`ROLE_USER` / `ROLE_AGENT`).
+  - **`Part`** is a flattened `oneof`: text → `{"text": …}`, data → `{"data": …}`, file → `{"raw": …}` / `{"url": …}` (no `type` discriminator).
+  - **`AgentCard`**: 0.3 top-level `url` → `supportedInterfaces` (`[{url, protocolBinding:"JSONRPC", protocolVersion:"1.0", tenant:""}]`); `supportsAuthenticatedExtendedCard` → `capabilities.extendedAgentCard`; `capabilities` gains `extensions`, drops `stateTransitionHistory`; `AgentSkill` gains `securityRequirements`; new required `provider`, `securityRequirements`, `signatures`.
+  - **Agent Card endpoint** is `/.well-known/agent-card.json` (1.0), with `/.well-known/agent.json` served as a 0.3 compatibility alias.
+- **apcore runtime bumped to 0.22** across all SDKs; `apcore-toolkit >= 0.8.0` added as a dependency (schema `$ref` resolution now delegates to the shared `deep_resolve_refs`).
+- **New apcore 0.22 capabilities wired:** real streaming via `Executor.stream()` (`StreamingModule`), cooperative cancellation via `CancelToken`, `global_deadline` (mapped from `execution_timeout`, now bounding the streaming path), `ObsLoggingMiddleware`, and `register_sys_modules` (new `sys_modules` option on `serve()` / `async_serve()`).
+- **Env prefix simplified** — `APCORE__A2A` (double underscore) → `APCORE_A2A` (single underscore).
+
+### Added
+
+- **Rust implementation** (`apcore-a2a-rust`) — a working A2A 1.0 server on axum 0.8 over apcore 0.22, at full feature parity with the Python and TypeScript SDKs (hand-rolled A2A 1.0 wire types; there is no Rust A2A SDK).
+- **Error Formatter Registry** (§8.8) — all SDKs register their `ErrorMapper` with `ErrorFormatterRegistry.register("a2a", ...)` so the ecosystem has a discoverable A2A error formatter.
+- **Config Bus namespace** (§9.13) — all SDKs register the `apcore-a2a` namespace with env prefix `APCORE_A2A` and defaults for `execution_timeout`, `cors_origins`, `explorer`, `metrics`, `push_notifications`.
+- **New error codes** — `MODULE_DISABLED`, `CONFIG_NAMESPACE_DUPLICATE`, `CONFIG_MOUNT_ERROR`, `CONFIG_BIND_ERROR` handled in ErrorMapper across all languages.
 
 ### Fixed (Cross-Language Sync)
 
@@ -25,6 +32,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **TypeScript `pushNotifications` parameter** — added to `A2AServerCreateOptions` and wired into capabilities.
 - **TypeScript `A2AClient.agentCard`** getter — equivalent to Python's `agent_card` async property.
 - **TypeScript `ErrorMapper.sanitizeMessage`** — changed from public to private, matching Python and spec.
+
+### Notes
+
+- All three implementations are upgraded to this spec and passing: Python (`a2a-sdk >= 1.0.0`, 282 tests), TypeScript (`@a2a-js/sdk >= 1.0.0-alpha.0`, 257 tests), and Rust (`apcore-a2a-rust`, 37 tests). The Rust server reaches full feature parity: JSON-RPC (message/send, message/stream SSE, tasks/get|cancel|list, pushNotificationConfig/set|get|delete), CancelToken, global_deadline, JWT auth, ObsLogging, sys_modules, CORS, Explorer UI, and webhook push delivery.
 
 ---
 

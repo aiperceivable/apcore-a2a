@@ -111,8 +111,8 @@ All tasks stored as plain Python dicts (JSON-serializable):
     "id": "uuid-v4-string",                    # required, unique
     "contextId": "uuid-v4-string",             # required
     "status": {
-        "state": "submitted",                  # current state
-        "message": str | None,                 # optional status message
+        "state": "TASK_STATE_SUBMITTED",       # current state (A2A 1.0 TaskState enum)
+        "message": dict | None,                # optional status Message
         "timestamp": "2026-03-03T10:00:00Z",   # ISO 8601 UTC
     },
     "artifacts": [],                           # list of Artifact dicts

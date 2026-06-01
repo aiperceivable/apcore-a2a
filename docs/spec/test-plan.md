@@ -344,7 +344,7 @@ jobs:
 
 ---
 
-#### TC-AGC-005: GET /.well-known/agent.json returns 200 with valid JSON
+#### TC-AGC-005: GET /.well-known/agent-card.json returns 200 with valid JSON
 
 | Field | Value |
 |-------|-------|
@@ -356,7 +356,7 @@ jobs:
 
 **Test Steps:**
 1. Start test ASGI client using `httpx.AsyncClient(app=asgi_app)`.
-2. Send `GET /.well-known/agent.json`.
+2. Send `GET /.well-known/agent-card.json`.
 3. Assert status code 200.
 4. Assert `Content-Type: application/json`.
 5. Assert `Cache-Control` header contains `max-age=300`.
@@ -367,7 +367,7 @@ jobs:
 
 ---
 
-#### TC-AGC-006: /.well-known/agent.json requires NO authentication
+#### TC-AGC-006: /.well-known/agent-card.json requires NO authentication
 
 | Field | Value |
 |-------|-------|
@@ -379,7 +379,7 @@ jobs:
 
 **Test Steps:**
 1. Start server with `JWTAuthenticator(secret="test-secret")` and `require_auth=True`.
-2. Send `GET /.well-known/agent.json` with NO `Authorization` header.
+2. Send `GET /.well-known/agent-card.json` with NO `Authorization` header.
 3. Assert status code 200.
 
 **Expected Result:** 200 (public endpoint, auth-exempt).
@@ -945,7 +945,7 @@ schema = {
 
 **Test Steps:**
 1. Create `A2AServerFactory().create(registry=stub_registry, executor=stub_executor)`.
-2. Assert ASGI app has route `GET /.well-known/agent.json`.
+2. Assert ASGI app has route `GET /.well-known/agent-card.json`.
 3. Assert ASGI app has route `POST /` for JSON-RPC.
 4. Assert ASGI app has route `GET /agent/authenticatedExtendedCard` (even if 404 without auth config).
 
@@ -1167,7 +1167,7 @@ schema = {
 
 **Test Steps:**
 1. Call `task = await task_manager.create_task(context_id="ctx-abc", skill_id="math.add")`.
-2. Assert `task.status.state == "submitted"`.
+2. Assert `task.status.state == "TASK_STATE_SUBMITTED"`.
 3. Assert `task.id` matches UUID v4 pattern `r'^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$'`.
 4. Assert `task.context_id == "ctx-abc"`.
 
@@ -1188,7 +1188,7 @@ schema = {
 **Test Steps:**
 1. Transition submitted → working: `await task_manager.transition(task_id, "working")`. Assert succeeds.
 2. Transition working → completed: assert succeeds.
-3. Assert `task.status.state == "completed"`.
+3. Assert `task.status.state == "TASK_STATE_COMPLETED"`.
 
 **Expected Result:** Both transitions succeed.
 
@@ -1244,7 +1244,7 @@ schema = {
 **Test Steps:**
 1. POST JSON-RPC `tasks/get` with `params = {"id": "task-456", "historyLength": 5}`.
 2. Assert response `result.id == "task-456"`.
-3. Assert `result.status.state == "completed"`.
+3. Assert `result.status.state == "TASK_STATE_COMPLETED"`.
 4. Assert `len(result.history) == 2`.
 
 **Expected Result:** Task returned with correct state and history.
@@ -1279,7 +1279,7 @@ schema = {
 
 **Test Steps:**
 1. POST JSON-RPC `tasks/cancel` with `params = {"id": task_id}`.
-2. Assert response task `status.state == "canceled"`.
+2. Assert response task `status.state == "TASK_STATE_CANCELED"`.
 
 **Expected Result:** Task canceled.
 
@@ -1351,8 +1351,8 @@ schema = {
 1. Start `message/stream` for a module.
 2. Read first SSE event.
 3. Parse event data as JSON-RPC response.
-4. Assert `result.kind == "status-update"`.
-5. Assert `result.status.state == "submitted"`.
+4. Assert `result.kind == "statusUpdate"`.
+5. Assert `result.status.state == "TASK_STATE_SUBMITTED"`.
 
 **Expected Result:** First event has submitted state.
 
@@ -1370,8 +1370,8 @@ schema = {
 
 **Test Steps:**
 1. Start `message/stream`.
-2. Collect all artifact-update events.
-3. Assert 3 artifact-update events received.
+2. Collect all artifactUpdate events.
+3. Assert 3 artifactUpdate events received.
 4. Assert second and third events have `append: true`.
 5. Assert last event has `lastChunk: true`.
 
@@ -1389,11 +1389,11 @@ schema = {
 
 **Test Steps:**
 1. Collect all SSE events.
-2. Assert last event `result.kind == "status-update"`.
-3. Assert `result.status.state == "completed"`.
-4. Assert `result.final == True`.
+2. Assert last event `result.kind == "statusUpdate"`.
+3. Assert `result.status.state == "TASK_STATE_COMPLETED"`.
+4. Assert the terminal state itself signals stream end (A2A 1.0 removed the `final` flag).
 
-**Expected Result:** Last event is completed status update with `final: true`.
+**Expected Result:** Last event is a completed status update; the terminal `TASK_STATE_COMPLETED` (not a `final` flag) closes the stream.
 
 ---
 
@@ -1484,11 +1484,11 @@ schema = {
 | **Priority** | P0 |
 | **SRS Trace** | FR-CLI-002 |
 
-**Preconditions:** Mock A2A server returns Task with `status.state == "completed"`.
+**Preconditions:** Mock A2A server returns Task with `status.state == "TASK_STATE_COMPLETED"`.
 
 **Test Steps:**
 1. Call `task = await client.send_message(skill_id="echo.text", inputs={"text": "hello"})`.
-2. Assert `task.status.state == "completed"`.
+2. Assert `task.status.state == "TASK_STATE_COMPLETED"`.
 3. Assert `task.id` is a valid UUID string.
 
 **Expected Result:** Completed Task returned.
@@ -1503,14 +1503,14 @@ schema = {
 | **Priority** | P0 |
 | **SRS Trace** | FR-CLI-003 |
 
-**Preconditions:** Mock server returns 3 SSE events: submitted, artifact-update, completed.
+**Preconditions:** Mock server returns 3 SSE events: submitted, artifactUpdate, completed.
 
 **Test Steps:**
 1. Call `events = client.stream_message(skill_id="data.process", inputs={})`.
 2. Collect all events with `async for event in events`.
 3. Assert 3 events received.
-4. Assert events[0].kind == "status-update" and events[0].status.state == "submitted".
-5. Assert events[2].status.state == "completed".
+4. Assert events[0].kind == "statusUpdate" and events[0].status.state == "TASK_STATE_SUBMITTED".
+5. Assert events[2].status.state == "TASK_STATE_COMPLETED".
 
 **Expected Result:** 3 events received in correct order.
 
@@ -1654,7 +1654,7 @@ schema = {
 
 **Test Steps:**
 1. Configure server with `require_auth=True`.
-2. GET `/.well-known/agent.json` without Authorization.
+2. GET `/.well-known/agent-card.json` without Authorization.
 3. Assert HTTP 200.
 
 **Expected Result:** HTTP 200 (exempt from auth).
@@ -1774,7 +1774,7 @@ schema = {
 1. Register push config for task with `url = "http://localhost:19999/hook"`.
 2. Transition task to `completed`.
 3. Assert mock webhook server received 1 POST request.
-4. Assert request body contains `TaskStatusUpdateEvent` with `state == "completed"`.
+4. Assert request body contains `TaskStatusUpdateEvent` with `state == "TASK_STATE_COMPLETED"`.
 
 **Expected Result:** Webhook POST received with correct event.
 
@@ -2025,7 +2025,7 @@ schema = {
    ```
 2. Assert HTTP 200.
 3. Assert `result.kind == "task"`.
-4. Assert `result.status.state == "completed"`.
+4. Assert `result.status.state == "TASK_STATE_COMPLETED"`.
 5. Assert `result.artifacts[0].parts[0].data == {"sum": 7}`.
 
 **Expected Result:** Completed task with `{"sum": 7}` artifact.
@@ -2045,9 +2045,9 @@ schema = {
 **Test Steps:**
 1. POST `message/stream` for `data.count`.
 2. Collect all SSE events.
-3. Assert first event: `kind == "status-update"`, `state == "submitted"`.
-4. Assert 3 artifact-update events follow.
-5. Assert last event: `kind == "status-update"`, `state == "completed"`, `final == True`.
+3. Assert first event: `kind == "statusUpdate"`, `state == "TASK_STATE_SUBMITTED"`.
+4. Assert 3 artifactUpdate events follow.
+5. Assert last event: `kind == "statusUpdate"`, `state == "TASK_STATE_COMPLETED"` (terminal state ends the stream; A2A 1.0 has no `final` flag).
 
 **Expected Result:** Events in order: submitted → 3×artifact → completed.
 
@@ -2102,7 +2102,7 @@ schema = {
 
 **Test Steps:**
 1. POST `message/send` for `fail.module`.
-2. Assert `result.status.state == "failed"`.
+2. Assert `result.status.state == "TASK_STATE_FAILED"`.
 3. Assert `result.status.message` is non-empty but does NOT contain "internal failure" (sanitized).
 
 **Expected Result:** Failed task with sanitized error message.
@@ -2123,7 +2123,7 @@ schema = {
 1. Create `A2AClient(base_url="http://testserver", http_client=test_client)`.
 2. `card = await client.discover()` — assert card has `name` and `skills`.
 3. `task = await client.send_message(skill_id="math.add", inputs={"a": 10, "b": 5})`.
-4. Assert `task.status.state == "completed"`.
+4. Assert `task.status.state == "TASK_STATE_COMPLETED"`.
 
 **Expected Result:** Discovery and task execution both succeed.
 
@@ -2183,7 +2183,7 @@ schema = {
 
 **Test Steps:**
 1. Start real uvicorn server on port 19001 in subprocess.
-2. `GET http://localhost:19001/.well-known/agent.json` — assert 200.
+2. `GET http://localhost:19001/.well-known/agent-card.json` — assert 200.
 3. POST `message/send` to `http://localhost:19001/` — assert completed task.
 4. Stop server.
 
@@ -2392,7 +2392,7 @@ schema = {
 
 **Test Steps:**
 1. POST `message/send` for `admin.users.delete` with insufficient permissions.
-2. Parse response — assert `result.status.state == "failed"` or `error.code == -32001`.
+2. Parse response — assert `result.status.state == "TASK_STATE_FAILED"` or `error.code == -32001`.
 3. Assert `"service-account-db-writer"` NOT in response body.
 4. Assert `"admin.users.delete"` NOT in response body.
 
@@ -2582,23 +2582,30 @@ TASKS_CANCEL_REQUEST = lambda task_id: {
   "name": "Test Agent",
   "description": "A test apcore agent with 2 skills",
   "version": "1.0.0",
-  "url": "http://localhost:8000",
+  "supportedInterfaces": [
+    {"url": "http://localhost:8000", "protocolBinding": "JSONRPC", "protocolVersion": "1.0", "tenant": ""}
+  ],
+  "provider": null,
   "defaultInputModes": ["application/json", "text/plain"],
   "defaultOutputModes": ["application/json"],
   "capabilities": {
     "streaming": true,
     "pushNotifications": false,
-    "stateTransitionHistory": false
+    "extensions": [],
+    "extendedAgentCard": false
   },
+  "securitySchemes": {},
+  "securityRequirements": [],
+  "signatures": [],
   "skills": [
     {
       "id": "math.add",
       "description": "Adds two integers and returns their sum",
       "tags": ["math", "arithmetic"],
-      "examples": [{"name": "Add 3 and 4", "input": "{\"a\": 3, \"b\": 4}"}],
+      "examples": ["Add 3 and 4"],
       "inputModes": ["application/json"],
       "outputModes": ["application/json"],
-      "extensions": {"apcore": {"annotations": {"readonly": true, "destructive": false, "idempotent": true, "requires_approval": false, "open_world": true}}}
+      "securityRequirements": []
     }
   ]
 }
@@ -2619,7 +2626,7 @@ TASKS_CANCEL_REQUEST = lambda task_id: {
 | FR-SRV-005 | Graceful shutdown | TC-SRV-008 (future) |
 | FR-AGC-001 | Agent Card from Registry metadata | TC-AGC-001, TC-AGC-002 |
 | FR-AGC-002 | Capabilities computed | TC-AGC-003, TC-AGC-004 |
-| FR-AGC-003 | Serve Agent Card at /.well-known/agent.json | TC-AGC-005, TC-AGC-006 |
+| FR-AGC-003 | Serve Agent Card at /.well-known/agent-card.json | TC-AGC-005, TC-AGC-006 |
 | FR-AGC-004 | Extended Agent Card | TC-AGC-007 |
 | FR-AGC-005 | Regenerate Agent Card on changes | TC-AGC-008 |
 | FR-SKL-001 | Module → Skill mapping | TC-SKL-001, TC-SKL-002, TC-SKL-003, TC-SKL-004, TC-SKL-005 |

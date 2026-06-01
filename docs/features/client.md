@@ -117,7 +117,9 @@ class AgentCardFetcher:
         ttl: float = 300.0,
     ) -> None:
         self._http = http
-        self._url = f"{base_url}/.well-known/agent.json"
+        # A2A 1.0 primary discovery path (the server also serves the 0.3
+        # `/.well-known/agent.json` alias for backward compatibility).
+        self._url = f"{base_url}/.well-known/agent-card.json"
         self._ttl = ttl
         self._cached: dict | None = None
         self._cached_at: float = 0.0
@@ -218,9 +220,13 @@ async with http.stream("POST", url, json=body) as response:
         if line.startswith("data: "):
             data = json.loads(line[6:])
             yield data
-            if data.get("final"):
+            # A2A 1.0 has no `final` flag — stop on a terminal statusUpdate.
+            su = data.get("statusUpdate") or {}
+            if su.get("status", {}).get("state") in _TERMINAL_STATES:
                 return
 ```
+
+where `_TERMINAL_STATES = {"TASK_STATE_COMPLETED", "TASK_STATE_FAILED", "TASK_STATE_CANCELED", "TASK_STATE_REJECTED"}`.
 
 Keepalive comment lines (`: keepalive`) are skipped silently.
 
@@ -268,7 +274,7 @@ The `httpx.AsyncClient` is initialized with:
 ```python
 async with A2AClient("https://agent.example.com", auth="Bearer eyJ...") as client:
     task = await client.send_message(
-        {"role": "user", "parts": [{"type": "text", "text": "resize to 800x600"}]},
+        {"role": "user", "parts": [{"text": "resize to 800x600"}]},
         metadata={"skillId": "image.resize"},
     )
 ```

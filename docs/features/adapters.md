@@ -66,21 +66,34 @@ class AgentCardBuilder:
 2. For each: `registry.get_definition(module_id)` → `ModuleDescriptor`.
 3. Skip modules with `description == ""` or `None` (log warning: `"Skipping module {module_id}: missing description"`).
 4. Convert each to Skill via `SkillMapper.to_skill(descriptor)`.
-5. Compute `capabilities`:
-   - `streaming`: True if executor has `stream()` method.
+5. Compute `capabilities` (A2A 1.0 `AgentCapabilities`):
+   - `streaming`: True (executor streaming is always available; non-streaming modules fall back to a single chunk).
    - `pushNotifications`: from configuration.
-   - `stateTransitionHistory`: from task store config.
-6. Build card dict:
+   - `extensions`: list of A2A protocol extensions (`[]` by default).
+   - `extendedAgentCard`: True when security schemes are configured (replaces 0.3's top-level `supportsAuthenticatedExtendedCard`).
+6. Build the **A2A 1.0** card. The 0.3 top-level `url` and `protocolVersion` are
+   replaced by `supportedInterfaces`; security requirements and signatures are
+   first-class:
    ```json
    {
-     "name": "...", "description": "...", "version": "...", "url": "...",
+     "name": "...", "description": "...", "version": "...",
+     "supportedInterfaces": [
+       {"url": "...", "protocolBinding": "JSONRPC", "protocolVersion": "1.0", "tenant": ""}
+     ],
+     "provider": null,
      "skills": [...],
-     "capabilities": {"streaming": bool, "pushNotifications": bool, "stateTransitionHistory": bool},
+     "capabilities": {"streaming": true, "pushNotifications": false, "extensions": [], "extendedAgentCard": false},
      "defaultInputModes": ["text/plain", "application/json"],
-     "defaultOutputModes": ["text/plain", "application/json"]
+     "defaultOutputModes": ["text/plain", "application/json"],
+     "securitySchemes": {},
+     "securityRequirements": [],
+     "signatures": []
    }
    ```
 7. Cache in `self._cached_card`. Extended card in `self._cached_extended_card`.
+
+> The card is served at `/.well-known/agent-card.json` (A2A 1.0). A
+> `/.well-known/agent.json` alias is also served for 0.3 client compatibility.
 
 ---
 
@@ -114,6 +127,7 @@ class SkillMapper:
 | `examples[:10]` | `examples` | `title` → `name`, `inputs` → JSON string in TextPart |
 | computed | `inputModes` | See mode logic below |
 | computed | `outputModes` | See mode logic below |
+| `[]` | `securityRequirements` | Required by A2A 1.0 `AgentSkill`; empty by default |
 | `annotations` | *(not mapped)* | See note below |
 
 **Input/output mode logic:**
@@ -132,10 +146,12 @@ class SkillMapper:
 
 ### 3. `SchemaConverter` — `adapters/schema.py`
 
-Converts apcore JSON Schemas for A2A DataPart usage. Reuses logic from apcore-mcp's SchemaConverter.
+Converts apcore JSON Schemas for A2A DataPart usage. `$ref` resolution is
+delegated to the shared **apcore-toolkit** resolver (`deep_resolve_refs` /
+`deepResolveRefs`), the same helper used by apcore-mcp and apcore-cli.
 
 ```python
-_MAX_REF_DEPTH = 32  # module-level constant
+from apcore_toolkit import deep_resolve_refs
 
 class SchemaConverter:
     def convert_input_schema(self, descriptor: object) -> dict:
@@ -147,12 +163,9 @@ class SchemaConverter:
     def detect_root_type(self, schema: dict | None) -> str:
         """Return 'string', 'object', or 'unknown'."""
 
-    def _inline_refs(self, schema: Any, defs: dict[str, Any],
-                     _seen: set[str] | None = None, _depth: int = 0) -> Any:
-        """Recursively resolve $ref. Raises ValueError on circular refs or depth > 32."""
-
-    def _resolve_ref(self, ref: str, defs: dict[str, Any]) -> dict:
-        """Resolve a single $ref string against $defs."""
+    def _convert_schema(self, schema: dict | None) -> dict:
+        """Deep-copy, delegate $ref inlining to deep_resolve_refs(schema, schema),
+        strip $defs, then ensure root type=object."""
 
     def _ensure_object_type(self, schema: dict) -> dict:
         """Ensure root schema has type: object."""
@@ -161,10 +174,12 @@ class SchemaConverter:
 **Conversion rules:**
 - `None` or `{}` → `{"type": "object", "properties": {}}`
 - Deep-copy before mutation (never mutate input)
-- Resolve all `#/$defs/...` references inline
+- Resolve all `#/$defs/...` references inline via `deep_resolve_refs`
 - Remove `$defs` key from result
-- Max recursion depth: 32 (raise `ValueError("Schema $ref depth limit exceeded")`)
-- Circular ref detected via `visited: set[str]` → raise `ValueError("Circular $ref detected")`
+- The toolkit resolver is **depth-capped (16) and non-throwing**: circular,
+  missing, or non-pointer `$ref`s resolve to a partial schema or `{}` rather
+  than raising (shared cross-SDK behavior, replacing the prior hand-rolled
+  resolver that raised `ValueError` on cycles/depth).
 
 ---
 
@@ -241,6 +256,14 @@ class PartConverter:
         5. Other → Artifact with [TextPart(text=str(output))]
         """
 ```
+
+> **A2A 1.0 Part shape.** `Part` is a protobuf `oneof`: a text part carries
+> `content = text`, a data part carries `content = data`. On the wire it
+> serializes flat — `{"text": "..."}` or `{"data": {...}}` — with no `type`
+> discriminator. Reading inspects the active oneof case (Python:
+> `part.WhichOneof("content")`; TypeScript: `part.content.$case`; Rust: the
+> `Part` enum variant). A "FilePart" corresponds to the `raw` (bytes) or `url`
+> oneof case and is rejected as unsupported.
 
 ## File Structure
 

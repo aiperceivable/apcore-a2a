@@ -89,7 +89,12 @@ async def _stream_generator(task_id, queue, params, identity):
             event = await asyncio.wait_for(queue.get(), timeout=30.0)
             event_id = _next_id(task_id)
             yield _format_sse_event(event, event_id)
-            if event.get("final"):
+            # A2A 1.0 removed the `final` flag. The stream ends when a
+            # statusUpdate carries a terminal TaskState
+            # (TASK_STATE_COMPLETED / TASK_STATE_FAILED / TASK_STATE_CANCELED /
+            # TASK_STATE_REJECTED).
+            su = event.get("statusUpdate")
+            if su and su.get("status", {}).get("state") in _TERMINAL_STATES:
                 break
     except asyncio.TimeoutError:
         # Send keepalive comment
@@ -105,35 +110,44 @@ async def _stream_generator(task_id, queue, params, identity):
 
 ## SSE Event Format
 
-All events follow the SSE spec (`text/event-stream`):
+All events follow the SSE spec (`text/event-stream`). Each `data:` line carries
+one **A2A 1.0** event. A2A 1.0 is protobuf-derived: events are a `oneof`
+discriminated by the wrapper key (`task` / `statusUpdate` / `artifactUpdate` /
+`msg`) — there is no `type`/`kind` field and no `final` flag. Field names are
+camelCase, and `TaskState` serializes as its full enum name
+(`TASK_STATE_SUBMITTED`, `TASK_STATE_WORKING`, `TASK_STATE_COMPLETED`, …).
+`Part` is a flattened `oneof`: a text part is `{"text":"…"}`, a data part is
+`{"data":{…}}` (no `type` discriminator).
 
 ```
 id: 1
-data: {"type":"TaskStatusUpdateEvent","taskId":"abc-123","contextId":"ctx-xyz","status":{"state":"submitted","timestamp":"2026-03-03T10:00:00.000Z"},"final":false}
+data: {"statusUpdate":{"taskId":"abc-123","contextId":"ctx-xyz","status":{"state":"TASK_STATE_SUBMITTED","timestamp":"2026-03-03T10:00:00.000Z"}}}
 
 id: 2
-data: {"type":"TaskStatusUpdateEvent","taskId":"abc-123","contextId":"ctx-xyz","status":{"state":"working","timestamp":"2026-03-03T10:00:00.050Z"},"final":false}
+data: {"statusUpdate":{"taskId":"abc-123","contextId":"ctx-xyz","status":{"state":"TASK_STATE_WORKING","timestamp":"2026-03-03T10:00:00.050Z"}}}
 
 id: 3
-data: {"type":"TaskArtifactUpdateEvent","taskId":"abc-123","contextId":"ctx-xyz","artifact":{"artifactId":"art-001","parts":[{"kind":"data","data":{"progress":50},"mediaType":"application/json"}]},"append":false,"lastChunk":false,"final":false}
+data: {"artifactUpdate":{"taskId":"abc-123","contextId":"ctx-xyz","artifact":{"artifactId":"art-001","parts":[{"data":{"progress":50}}]},"append":false,"lastChunk":false}}
 
 id: 4
-data: {"type":"TaskStatusUpdateEvent","taskId":"abc-123","contextId":"ctx-xyz","status":{"state":"completed","timestamp":"2026-03-03T10:00:05.000Z"},"artifacts":[...],"final":true}
+data: {"statusUpdate":{"taskId":"abc-123","contextId":"ctx-xyz","status":{"state":"TASK_STATE_COMPLETED","timestamp":"2026-03-03T10:00:05.000Z"}}}
 
 ```
 
-**`final: true`** signals the client to close the SSE connection.
+A **terminal `statusUpdate`** (`TASK_STATE_COMPLETED`, `TASK_STATE_FAILED`,
+`TASK_STATE_CANCELED`, or `TASK_STATE_REJECTED`) signals the client to close the
+SSE connection. (In A2A 0.3 this was the `final: true` flag, which 1.0 removed.)
 
 ## `handle_resubscribe()` Logic
 
 1. Extract `task_id = params.get("id")` → error -32001 if missing.
 2. `task = await task_manager.get_task(task_id)` → error -32001 if None.
-3. If task state is terminal (`completed`, `failed`, `canceled`):
-   - Return `StreamingResponse` with single event: current `TaskStatusUpdateEvent` with `final: true`.
+3. If task state is terminal (`TASK_STATE_COMPLETED`, `TASK_STATE_FAILED`, `TASK_STATE_CANCELED`, `TASK_STATE_REJECTED`):
+   - Return `StreamingResponse` with a single `statusUpdate` event carrying the current terminal state.
 4. If task state is active:
    - Subscribe to events, start SSE stream from current state.
-   - First event: current `TaskStatusUpdateEvent` for current state.
-   - Continue streaming until terminal event.
+   - First event: current `statusUpdate` for current state.
+   - Continue streaming until a terminal `statusUpdate` is emitted.
 
 ## Artifact Streaming
 
@@ -160,9 +174,10 @@ src/apcore_a2a/server/
 
 ## Key Invariants
 
-- First SSE event (submitted) emitted within 50ms of request receipt
-- `final: true` always on the last event
-- Client disconnect with `cancel_on_disconnect=True` triggers task cancellation
+- First SSE event (`statusUpdate` with `TASK_STATE_SUBMITTED`) emitted within 50ms of request receipt
+- The last event is always a terminal `statusUpdate` (`TASK_STATE_COMPLETED` / `TASK_STATE_FAILED` / `TASK_STATE_CANCELED` / `TASK_STATE_REJECTED`); A2A 1.0 has no `final` flag
+- Client disconnect with `cancel_on_disconnect=True` triggers task cancellation (cooperatively via apcore `CancelToken`)
+- Long-running streams are bounded by apcore's `global_deadline` (mapped from `execution_timeout`); on expiry the stream ends with a failed `statusUpdate`
 - Keepalive every 30s for long-running tasks
 - `event_id` is monotonically increasing per-task
 

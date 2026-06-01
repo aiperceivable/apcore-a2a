@@ -61,7 +61,7 @@ apcore-a2a does NOT reimplement the A2A protocol (it uses the official `a2a-sdk`
 | Term | Definition |
 |------|------------|
 | **A2A** | Agent-to-Agent protocol. Open standard by Google/Linux Foundation for inter-agent communication, discovery, and task delegation. |
-| **Agent Card** | JSON document served at `/.well-known/agent.json` describing an A2A agent's identity, capabilities, skills, and security schemes. |
+| **Agent Card** | JSON document served at `/.well-known/agent-card.json` describing an A2A agent's identity, capabilities, skills, and security schemes. |
 | **apcore** | Schema-driven module development framework providing Registry, Executor, and schema validation for modular applications. |
 | **apcore-python** | The Python SDK implementation of the apcore framework. Provides `Registry`, `Executor`, `ModuleDescriptor`, `ModuleAnnotations`, and the error hierarchy. |
 | **Artifact** | Output produced by an A2A task. Contains Parts (TextPart, DataPart, FilePart) representing the result of module execution. |
@@ -211,7 +211,7 @@ apcore-a2a is the second adapter in the planned family. It depends on the `apcor
 2. `serve(registry, host="127.0.0.1", port=9000)` SHALL bind to the specified host and port.
 3. `serve(executor)` SHALL accept an Executor instance (duck-typed: any object with `call_async()`, `stream()`, `validate()` methods).
 4. The server SHALL respond to A2A JSON-RPC 2.0 requests at the root path `/`.
-5. The server SHALL respond to Agent Card requests at `GET /.well-known/agent.json`.
+5. The server SHALL respond to Agent Card requests at `GET /.well-known/agent-card.json`.
 6. The server SHALL shut down cleanly on SIGINT and SIGTERM signals within 5 seconds.
 7. The function SHALL block the calling thread until the server is shut down.
 8. The function SHALL raise `ValueError` with a descriptive message if the registry/executor has zero modules.
@@ -349,7 +349,7 @@ apcore-a2a is the second adapter in the planned family. It depends on the `apcor
 **Acceptance Criteria:**
 1. `capabilities.streaming` SHALL be `true` if at least one registered module supports streaming (determined by Executor capability).
 2. `capabilities.pushNotifications` SHALL be `true` if push notifications are enabled via `serve(registry, push_notifications=True)`.
-3. `capabilities.stateTransitionHistory` SHALL be `true` if the configured task store supports history recording.
+3. The task store SHALL record state-transition history when it supports history recording. (A2A 1.0 removed the 0.3 `capabilities.stateTransitionHistory` flag; history is no longer advertised as a capability.)
 4. If no modules support streaming AND push notifications are disabled AND history is not supported, `capabilities` SHALL still be present with all fields set to `false`.
 
 ---
@@ -364,10 +364,10 @@ apcore-a2a is the second adapter in the planned family. It depends on the `apcor
 
 **Description:** The server SHALL serve the Agent Card as a JSON document at the standard A2A well-known endpoint.
 
-**Rationale:** `/.well-known/agent.json` is the A2A standard discovery endpoint. All A2A clients expect to find the Agent Card at this URL.
+**Rationale:** `/.well-known/agent-card.json` is the A2A standard discovery endpoint. All A2A clients expect to find the Agent Card at this URL.
 
 **Acceptance Criteria:**
-1. `GET /.well-known/agent.json` SHALL return HTTP 200 with `Content-Type: application/json`.
+1. `GET /.well-known/agent-card.json` SHALL return HTTP 200 with `Content-Type: application/json`.
 2. The response body SHALL be a valid JSON document conforming to the A2A v0.3.0 Agent Card schema.
 3. The response SHALL include `Cache-Control: max-age=300` header (5-minute cache).
 4. The endpoint SHALL NOT require authentication.
@@ -1045,7 +1045,7 @@ apcore-a2a is the second adapter in the planned family. It depends on the `apcor
 **Rationale:** Agent Card discovery is the first step in any A2A interaction. Caching prevents redundant HTTP requests for repeated interactions.
 
 **Acceptance Criteria:**
-1. `client.agent_card` property SHALL fetch the Agent Card from `<url>/.well-known/agent.json` on first access.
+1. `client.agent_card` property SHALL fetch the Agent Card from `<url>/.well-known/agent-card.json` on first access.
 2. The Agent Card SHALL be cached with a configurable TTL (default: 5 minutes).
 3. After TTL expiration, the next access SHALL trigger a fresh fetch.
 4. HTTP errors during Agent Card fetch SHALL raise `A2ADiscoveryError` with the status code and URL.
@@ -1603,7 +1603,7 @@ apcore-a2a is the second adapter in the planned family. It depends on the `apcor
 **Rationale:** Agent Card is served from pre-computed memory. High latency would indicate an implementation defect.
 
 **Acceptance Criteria:**
-1. `GET /.well-known/agent.json` SHALL respond in less than 10ms (p99) under normal load.
+1. `GET /.well-known/agent-card.json` SHALL respond in less than 10ms (p99) under normal load.
 2. Measured via load test: 1,000 concurrent requests against the Agent Card endpoint.
 3. The Agent Card SHALL be pre-computed at startup and served from memory (not regenerated per request).
 
@@ -1731,7 +1731,7 @@ apcore-a2a is the second adapter in the planned family. It depends on the `apcor
 **Rationale:** Fast startup enables rapid iteration during development and fast recovery from restarts in production.
 
 **Acceptance Criteria:**
-1. Time from `serve()` invocation to successful `GET /.well-known/agent.json` response SHALL be less than 2 seconds.
+1. Time from `serve()` invocation to successful `GET /.well-known/agent-card.json` response SHALL be less than 2 seconds.
 2. Measured via integration test with timestamp comparison.
 
 ---
@@ -2197,7 +2197,7 @@ apcore-a2a is the second adapter in the planned family. It depends on the `apcor
 3. Orchestrator has a valid `skillId` for the target module.
 
 **Main Flow:**
-1. Orchestrator sends HTTP POST to `/` with JSON-RPC 2.0 body: `{"jsonrpc":"2.0","id":"1","method":"message/send","params":{"message":{"role":"user","parts":[{"type":"text","text":"resize image to 800x600"}]},"metadata":{"skillId":"image.resize"}}}`.
+1. Orchestrator sends HTTP POST to `/` with JSON-RPC 2.0 body: `{"jsonrpc":"2.0","id":"1","method":"message/send","params":{"message":{"role":"user","parts":[{"text":"resize image to 800x600"}]},"metadata":{"skillId":"image.resize"}}}`.
 2. Server validates JSON-RPC structure.
 3. Server extracts `skillId` from `params.metadata.skillId`.
 4. Server creates Task with `status.state = "submitted"`, unique `taskId`, and auto-generated `contextId`.
@@ -2355,7 +2355,7 @@ apcore-a2a is the second adapter in the planned family. It depends on the `apcor
 **Main Flow:**
 1. Maya creates client: `client = A2AClient("https://remote-agent.example.com")`.
 2. Maya fetches Agent Card: `card = await client.agent_card`.
-3. Client sends GET to `https://remote-agent.example.com/.well-known/agent.json`.
+3. Client sends GET to `https://remote-agent.example.com/.well-known/agent-card.json`.
 4. Client receives and caches the Agent Card (TTL: 5 minutes).
 5. Maya inspects skills: `print(card.skills)`.
 6. Maya sends message: `task = await client.send_message(message)`.
@@ -2461,7 +2461,7 @@ apcore-a2a is the second adapter in the planned family. It depends on the `apcor
 3. Orchestrator has a valid JWT token from the configured issuer.
 
 **Main Flow:**
-1. Orchestrator fetches public Agent Card at `GET /.well-known/agent.json` (no auth required).
+1. Orchestrator fetches public Agent Card at `GET /.well-known/agent-card.json` (no auth required).
 2. Orchestrator notes `securitySchemes` and obtains a Bearer token from the corporate IdP.
 3. Orchestrator fetches extended Agent Card at `GET /agent/authenticatedExtendedCard` with `Authorization: Bearer <token>`.
 4. Server validates JWT (signature, expiration, issuer, audience).
@@ -2506,7 +2506,7 @@ The following matrix maps data entities to operations across the system's module
 | **Task** | FR-MSG-001 (message/send creates task), FR-MSG-002 (message/stream creates task) | FR-TSK-004 (tasks/get), FR-TSK-006 (tasks/list) | FR-TSK-001 (state transitions), FR-TSK-005 (tasks/cancel) | FR-STR-002 (TTL expiration) |
 | **Message** | FR-MSG-001 (incoming message), FR-MSG-003 (Part parsing) | FR-CTX-002 (context history read) | -- | FR-CTX-002 (FIFO eviction at max history) |
 | **Artifact** | FR-MSG-004 (output conversion) | FR-TSK-004 (tasks/get returns artifacts) | FR-MSG-002 (append during streaming) | -- |
-| **AgentCard** | FR-AGC-001 (generation at startup) | FR-AGC-003 (GET /.well-known/agent.json), FR-AGC-004 (extended card) | FR-AGC-005 (regeneration on module changes) | -- |
+| **AgentCard** | FR-AGC-001 (generation at startup) | FR-AGC-003 (GET /.well-known/agent-card.json), FR-AGC-004 (extended card) | FR-AGC-005 (regeneration on module changes) | -- |
 | **Skill** | FR-SKL-001 (module to skill conversion) | FR-AGC-003 (via Agent Card) | FR-OPS-003 (hot-reload updates) | FR-OPS-003 (removal on module unregister) |
 | **PushNotificationConfig** | FR-PSH-001 (set webhook) | FR-PSH-004 (get config) | FR-PSH-003 (mark as failed after retries) | FR-PSH-004 (delete config) |
 | **Context** | FR-CTX-001 (auto-generated contextId) | FR-CTX-002 (history retrieval) | FR-CTX-002 (append messages) | FR-CTX-004 (cleanup on TTL) |
@@ -2714,7 +2714,7 @@ All JSON-RPC endpoints accept `Content-Type: application/json` and return `Conte
 
 | Endpoint | Method | Auth Required | Description |
 |----------|--------|:---:|-------------|
-| `GET /.well-known/agent.json` | GET | No | Public Agent Card |
+| `GET /.well-known/agent-card.json` | GET | No | Public Agent Card |
 | `GET /agent/authenticatedExtendedCard` | GET | Yes | Extended Agent Card with privileged skills |
 | `GET /health` | GET | No | Health check (when enabled) |
 | `GET /metrics` | GET | No | Metrics (when enabled) |
@@ -2924,7 +2924,7 @@ The system consumes A2A types, JSON-RPC handling, and SSE utilities from the `a2
 | Term | Definition |
 |------|-----------|
 | **A2A** | Agent-to-Agent protocol. Open standard by Google/Linux Foundation for inter-agent communication. Enables diverse AI agents to discover, communicate, and collaborate on tasks. |
-| **Agent Card** | JSON document describing an A2A agent's identity, capabilities, skills, and security schemes. Served at `/.well-known/agent.json` for standard discovery. |
+| **Agent Card** | JSON document describing an A2A agent's identity, capabilities, skills, and security schemes. Served at `/.well-known/agent-card.json` for standard discovery. |
 | **apcore** | Schema-driven module development framework. Protocol-agnostic core with adapter-based protocol support (MCP via apcore-mcp, A2A via apcore-a2a). |
 | **Artifact** | Output produced by an A2A task. Contains Parts (TextPart, DataPart, FilePart) representing the result of module execution. |
 | **contextId** | UUID v4 identifier grouping multiple messages into a multi-turn conversation. Enables stateful interactions and input elicitation. |

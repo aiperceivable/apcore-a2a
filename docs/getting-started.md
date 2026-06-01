@@ -68,13 +68,13 @@ Your agent is now running. Verify by visiting:
 === "Python"
 
     ```
-    http://localhost:8000/.well-known/agent.json
+    http://localhost:8000/.well-known/agent-card.json
     ```
 
 === "TypeScript"
 
     ```
-    http://localhost:8000/.well-known/agent.json
+    http://localhost:8000/.well-known/agent-card.json
     ```
 
 This returns the auto-generated **Agent Card** — a JSON document describing your agent's name, skills, and capabilities, all derived from your apcore module metadata.
@@ -140,7 +140,7 @@ Use `A2AClient` to discover and invoke any A2A-compliant agent.
 
             # Send a message
             task = await client.send_message(
-                {"role": "user", "parts": [{"type": "text", "text": "Hello from Python!"}]},
+                {"role": "user", "parts": [{"text": "Hello from Python!"}]},
                 metadata={"skillId": "greeting.hello"},
             )
             print(f"Result: {task['status']['state']}")
@@ -162,7 +162,7 @@ Use `A2AClient` to discover and invoke any A2A-compliant agent.
 
     // Send a message
     const task = await client.sendMessage(
-      { role: "user", parts: [{ type: "text", text: "Hello from TypeScript!" }] },
+      { role: "user", parts: [{ text: "Hello from TypeScript!" }] },
       { metadata: { skillId: "greeting.hello" } },
     );
     const status = task["status"] as Record<string, unknown>;
@@ -184,13 +184,14 @@ For long-running tasks, use SSE streaming to receive real-time updates.
 
     async with A2AClient("http://localhost:8000") as client:
         async for event in client.stream_message(
-            {"role": "user", "parts": [{"type": "text", "text": "Process this data"}]},
+            {"role": "user", "parts": [{"text": "Process this data"}]},
             metadata={"skillId": "data.process"},
         ):
-            if "status" in event:
-                print(f"Status: {event['status']['state']}")
-            if "artifact" in event:
-                print(f"Artifact: {event['artifact']}")
+            # A2A 1.0 events are oneof-wrapped: statusUpdate / artifactUpdate
+            if "statusUpdate" in event:
+                print(f"Status: {event['statusUpdate']['status']['state']}")
+            if "artifactUpdate" in event:
+                print(f"Artifact: {event['artifactUpdate']['artifact']}")
     ```
 
 === "TypeScript"
@@ -201,14 +202,15 @@ For long-running tasks, use SSE streaming to receive real-time updates.
     const client = new A2AClient("http://localhost:8000");
 
     for await (const event of client.streamMessage(
-      { role: "user", parts: [{ type: "text", text: "Process this data" }] },
+      { role: "user", parts: [{ text: "Process this data" }] },
       { metadata: { skillId: "data.process" } },
     )) {
-      if (event.status) {
-        console.log(`Status: ${event.status.state}`);
+      // A2A 1.0 events are oneof-wrapped: statusUpdate / artifactUpdate
+      if (event.statusUpdate) {
+        console.log(`Status: ${event.statusUpdate.status.state}`);
       }
-      if (event.artifact) {
-        console.log(`Artifact:`, event.artifact);
+      if (event.artifactUpdate) {
+        console.log(`Artifact:`, event.artifactUpdate.artifact);
       }
     }
     ```

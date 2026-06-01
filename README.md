@@ -5,17 +5,24 @@
 # apcore-a2a
 
 [![License](https://img.shields.io/badge/License-Apache_2.0-blue.svg)](https://opensource.org/licenses/Apache-2.0)
+[![A2A Protocol](https://img.shields.io/badge/A2A-1.0-blue.svg)](https://google.github.io/A2A/)
 [![Python Version](https://img.shields.io/badge/python-3.11%2B-blue)](https://www.python.org/downloads/)
 [![TypeScript](https://img.shields.io/badge/TypeScript-Node_18%2B-blue)](https://github.com/aiperceivable/apcore-a2a-typescript)
+[![Rust](https://img.shields.io/badge/Rust-1.75%2B-orange.svg)](https://github.com/aiperceivable/apcore-a2a-rust)
 
 > **Build once, invoke by Code or AI.**
 
-**apcore-a2a** is an automatic [A2A (Agent-to-Agent)](https://google.github.io/A2A/) protocol adapter for the [apcore](https://github.com/aiperceivable/apcore) ecosystem. It allows you to expose any apcore Module Registry as a fully functional, standards-compliant A2A agent with zero manual effort.
+**apcore-a2a** is an automatic [A2A (Agent-to-Agent)](https://google.github.io/A2A/) protocol adapter for the [apcore](https://github.com/aiperceivable/apcore) ecosystem. It allows you to expose any apcore Module Registry as a fully functional, standards-compliant **A2A 1.0** agent with zero manual effort.
+
+It solves a common problem: **you've built AI capabilities with apcore modules, but you need them to talk to other AI agents over a standard protocol.** apcore-a2a reads your existing module metadata (schemas, descriptions, examples) and exposes them as a standards-compliant A2A server — no hand-written Agent Cards, no JSON-RPC boilerplate, no manual task lifecycle management.
 
 ### 🚀 Official SDKs
 
+All three SDKs implement the same A2A 1.0 contract defined in this repository's [specs](docs/).
+
 - **Python SDK**: [aiperceivable/apcore-a2a-python](https://github.com/aiperceivable/apcore-a2a-python)
 - **TypeScript SDK**: [aiperceivable/apcore-a2a-typescript](https://github.com/aiperceivable/apcore-a2a-typescript)
+- **Rust SDK**: [aiperceivable/apcore-a2a-rust](https://github.com/aiperceivable/apcore-a2a-rust)
 
 ---
 
@@ -24,13 +31,16 @@ By reading the existing apcore metadata—including `input_schema`, `output_sche
 ## Key Features
 
 - **🚀 One-Call Server**: Launch a compliant A2A server using `serve(registry)`.
-- **📇 Auto Agent Card**: Generates `/.well-known/agent.json` automatically from your module metadata.
-- **🛠️ Skill Mapping**: Converts apcore modules into A2A Skills, preserving schemas and examples.
-- **🔄 Task Lifecycle**: Full implementation of the A2A task state machine (submitted, working, completed, failed, etc.).
-- **📡 Streaming & SSE**: Native support for `message/stream` with real-time status and artifact updates.
+- **📇 Auto Agent Card**: Generates `/.well-known/agent-card.json` (A2A 1.0; `/.well-known/agent.json` alias for 0.3 clients) automatically from your module metadata.
+- **🛠️ Skill Mapping**: Converts apcore modules into A2A Skills, preserving schemas and examples; `metadata["display"]["a2a"]` overrides surface-facing fields (§5.13).
+- **🔄 Task Lifecycle**: Full implementation of the A2A task state machine (submitted, working, completed, failed, canceled, input-required).
+- **📡 Streaming & SSE**: Native support for `message/stream` with real-time status and artifact updates, plus cooperative cancellation (`tasks/cancel`).
 - **🔗 A2A Client**: A built-in `A2AClient` to discover and invoke other A2A agents.
-- **🛡️ Enterprise Ready**: JWT/Bearer authentication bridged directly to apcore's ACL (Identity) system.
-- **🔔 Push Notifications**: Support for webhook-based task state updates.
+- **🛡️ Enterprise Ready**: JWT/Bearer authentication bridged directly to apcore's ACL (Identity) system; configurable CORS.
+- **🔔 Push Notifications**: Webhook-based task state updates with retry.
+- **🔍 Explorer UI**: Built-in browser UI for discovering and testing skills.
+- **📊 Observability**: `/health` and `/metrics` endpoints with structured logging; optional apcore `sys.*` modules.
+- **🧩 Pluggable Storage**: Swap in Redis/PostgreSQL via the `TaskStore` protocol.
 
 ---
 
@@ -40,13 +50,19 @@ By reading the existing apcore metadata—including `input_schema`, `output_sche
     ```bash
     pip install apcore-a2a
     ```
-    *Requires Python 3.11+ and apcore 0.14.0+.*
+    *Requires Python 3.11+ and apcore 0.22.0+.*
 
 === "TypeScript"
     ```bash
     npm install apcore-a2a
     ```
-    *Requires Node.js 18+ and apcore-js 0.14.0+.*
+    *Requires Node.js 18+ and apcore-js 0.22.0+.*
+
+=== "Rust"
+    ```bash
+    cargo add apcore-a2a
+    ```
+    *Requires Rust 1.75+ and apcore 0.22+.*
 
 ---
 
@@ -83,6 +99,22 @@ If you already have apcore modules, you can expose them as an A2A agent in just 
     });
     ```
 
+=== "Rust"
+    ```rust
+    use apcore_a2a::{async_serve, APCoreA2AConfig, BackendSource};
+
+    #[tokio::main]
+    async fn main() -> Result<(), Box<dyn std::error::Error>> {
+        let config = APCoreA2AConfig {
+            name: "My Assistant Agent".into(),
+            url: "http://0.0.0.0:8000".into(),
+            ..Default::default()
+        };
+        async_serve(BackendSource::from("./extensions"), config).await?;
+        Ok(())
+    }
+    ```
+
 ### 2. Call a remote A2A Agent
 
 Use the `A2AClient` to interact with any A2A-compliant agent:
@@ -101,7 +133,7 @@ Use the `A2AClient` to interact with any A2A-compliant agent:
             # Send a message
             task = await client.send_message({
                 "role": "user",
-                "parts": [{"type": "text", "text": "Hello, how can you help?"}]
+                "parts": [{"text": "Hello, how can you help?"}]
             }, metadata={"skillId": "general.chat"})
             
             print(f"Task status: {task['status']['state']}")
@@ -122,18 +154,27 @@ Use the `A2AClient` to interact with any A2A-compliant agent:
 
     // Send a message
     const task = await client.sendMessage(
-      { role: "user", parts: [{ type: "text", text: "Hello, how can you help?" }] },
+      { role: "user", parts: [{ text: "Hello, how can you help?" }] },
       { metadata: { skillId: "general.chat" } }
     );
     
     console.log(`Task status: ${task.status.state}`);
     ```
 
+=== "Rust"
+    ```rust
+    use apcore_a2a::A2AClient;
+
+    let client = A2AClient::new("http://remote-agent:8000");
+    let task = client.send_message("general.chat", "Hello, how can you help?").await?;
+    println!("Task status: {}", task["status"]["state"]);
+    ```
+
 ---
 
 ## Architecture
 
-apcore-a2a acts as a thin, protocol-specific layer on top of `apcore-python`. It maps A2A concepts to apcore primitives:
+apcore-a2a acts as a thin, protocol-specific layer on top of apcore (Python, TypeScript, and Rust). It maps A2A concepts to apcore primitives:
 
 | A2A Concept | apcore Mapping |
 |-------------|----------------|

@@ -133,7 +133,7 @@ class AuthMiddleware:
     ) -> None:
         self._app = app
         self._authenticator = authenticator
-        self._exempt_paths = exempt_paths or {"/.well-known/agent.json", "/health", "/metrics"}
+        self._exempt_paths = exempt_paths or {"/.well-known/agent-card.json", "/.well-known/agent.json", "/health", "/metrics"}
         self._exempt_prefixes = exempt_prefixes or set()
         self._require_auth = require_auth
 
@@ -153,7 +153,7 @@ class AuthMiddleware:
         """
 ```
 
-**Default exempt paths**: `{"/.well-known/agent.json", "/health", "/metrics"}`.
+**Default exempt paths**: `{"/.well-known/agent-card.json", "/.well-known/agent.json", "/health", "/metrics"}`.
 
 **Explorer exemption**: When `explorer=True`, add `explorer_prefix` to `exempt_prefixes`.
 
@@ -196,7 +196,7 @@ src/apcore_a2a/auth/
 
 - `authenticate()` NEVER raises — returns None for any auth failure
 - `AuthMiddleware` resets ContextVar in `finally` block (no identity leak between requests)
-- `/.well-known/agent.json` is always exempt from auth (public discovery)
+- `/.well-known/agent-card.json` (and its `/.well-known/agent.json` alias) is always exempt from auth (public discovery)
 - `require_auth=False` (permissive mode): unauthenticated requests proceed with `identity=None`
 - Identity flows through ContextVar, not function parameters (avoids invasive API changes)
 
