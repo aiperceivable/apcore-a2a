@@ -89,7 +89,7 @@ apcore-a2a does NOT reimplement the A2A protocol (it uses the official `a2a-sdk`
 | REF-01 | `docs/apcore-a2a/prd.md` v1.0 | Product Requirements Document -- primary input for this SRS |
 | REF-02 | `ideas/apcore-a2a.md` | Validated idea document with schema mapping and architecture context |
 | REF-03 | apcore-python source (`apcore` package >= 0.6.0) | SDK source: Registry, Executor, ModuleDescriptor, ModuleAnnotations, error hierarchy |
-| REF-04 | [A2A Protocol Specification (v0.3.0)](https://google.github.io/A2A/) | Official Agent-to-Agent protocol specification |
+| REF-04 | [A2A Protocol Specification (1.0)](https://google.github.io/A2A/) | Official Agent-to-Agent protocol specification |
 | REF-05 | [A2A Python SDK (a2a-sdk)](https://pypi.org/project/a2a-sdk/) | Official Python SDK for building A2A agents and clients |
 | REF-06 | apcore-mcp SRS (`docs/srs-apcore-mcp.md`) | Sibling adapter SRS -- architectural pattern reference |
 | REF-07 | IEEE 830-1998 | IEEE Recommended Practice for SRS |
@@ -168,7 +168,7 @@ apcore-a2a is the second adapter in the planned family. It depends on the `apcor
 | C-04 | Python >= 3.11 required | Aligns with apcore-python minimum; needed for modern async features |
 | C-05 | Authentication bridges to apcore ACL, not replaces it | JWT validation at HTTP layer injects Identity into Context for Executor ACL |
 | C-06 | A2A Client must be importable independently without server-side dependencies | Maximum flexibility; `from apcore_a2a.client import A2AClient` shall not import starlette/uvicorn |
-| C-07 | Full compliance with A2A v0.3.0 specification | Interoperability with all A2A-compliant agents and clients |
+| C-07 | Full compliance with A2A 1.0 specification | Interoperability with all A2A-compliant agents and clients |
 
 ### 2.5 Assumptions and Dependencies
 
@@ -178,7 +178,7 @@ apcore-a2a is the second adapter in the planned family. It depends on the `apcor
 | A-02 | The `a2a-sdk` Python package provides stable APIs for A2A types, JSON-RPC handling, and SSE utilities | Assumption |
 | A-03 | apcore modules produce JSON-serializable output dicts from their `execute()` methods | Assumption |
 | A-04 | Python >= 3.11 is available in the target deployment environment | Assumption |
-| A-05 | A2A clients correctly implement the A2A v0.3.0 protocol for agent discovery and task operations | Assumption |
+| A-05 | A2A clients correctly implement the A2A 1.0 protocol for agent discovery and task operations | Assumption |
 | D-01 | `apcore` package >= 0.6.0 | Dependency |
 | D-02 | `a2a-sdk` package (latest stable) | Dependency |
 | D-03 | `starlette` >= 0.27 | Dependency |
@@ -323,7 +323,7 @@ apcore-a2a is the second adapter in the planned family. It depends on the `apcor
 **Rationale:** The Agent Card is the standard A2A discovery mechanism. Automatic generation from existing metadata eliminates manual authoring effort and ensures consistency.
 
 **Acceptance Criteria:**
-1. The generated Agent Card SHALL conform to A2A v0.3.0 Agent Card JSON Schema.
+1. The generated Agent Card SHALL conform to A2A 1.0 Agent Card JSON Schema.
 2. `AgentCard.name` SHALL be populated from Registry config `project.name`; fallback to `"apcore-agent"` if not configured.
 3. `AgentCard.description` SHALL be populated from Registry config `project.description`; fallback to auto-generated description listing module count (e.g., "apcore agent with 10 skills").
 4. `AgentCard.version` SHALL be populated from Registry config `project.version`; fallback to `"0.0.0"`.
@@ -368,7 +368,7 @@ apcore-a2a is the second adapter in the planned family. It depends on the `apcor
 
 **Acceptance Criteria:**
 1. `GET /.well-known/agent-card.json` SHALL return HTTP 200 with `Content-Type: application/json`.
-2. The response body SHALL be a valid JSON document conforming to the A2A v0.3.0 Agent Card schema.
+2. The response body SHALL be a valid JSON document conforming to the A2A 1.0 Agent Card schema.
 3. The response SHALL include `Cache-Control: max-age=300` header (5-minute cache).
 4. The endpoint SHALL NOT require authentication.
 5. The response time SHALL be less than 10ms (p99) under normal load (pre-computed card served from memory).
@@ -485,7 +485,7 @@ apcore-a2a is the second adapter in the planned family. It depends on the `apcor
 
 ---
 
-#### FR-SKL-004: Include module annotations as Skill extensions
+#### FR-SKL-004: Surface module annotations via Explorer enrichment
 
 | Field | Value |
 |-------|-------|
@@ -493,15 +493,14 @@ apcore-a2a is the second adapter in the planned family. It depends on the `apcor
 | **Priority** | P0 |
 | **PRD Trace** | FR-003 |
 
-**Description:** The system SHALL include apcore module annotations as extension metadata on A2A Skills, using the A2A extensions mechanism.
+**Description:** The system SHALL NOT include apcore module annotations as A2A Skill extensions. The A2A 1.0 `AgentSkill` type has no `extensions` field, so annotations SHALL instead be surfaced through the Explorer UI's `_inputSchemas` enrichment.
 
-**Rationale:** A2A has no native annotation fields for readonly, destructive, etc. Using the extensions mechanism preserves this information for apcore-aware clients without breaking non-apcore clients.
+**Rationale:** A2A 1.0 `AgentSkill` has no `extensions` field; the previously planned `extensions.apcore.annotations` mechanism is not representable. Annotations (readonly, destructive, etc.) remain available to apcore-aware tooling via the Explorer enrichment without polluting the standard Agent Card.
 
 **Acceptance Criteria:**
-1. When `ModuleAnnotations` is present, the Skill SHALL include `extensions.apcore.annotations` with keys: `readonly`, `destructive`, `idempotent`, `requires_approval`, `open_world`.
-2. Each annotation value SHALL be a boolean matching the apcore annotation value.
-3. When `ModuleAnnotations` is `None`, the `extensions.apcore.annotations` key SHALL be omitted.
-4. Non-apcore A2A clients SHALL be able to parse the Agent Card without error (extensions are ignored by clients that do not recognize them).
+1. The generated A2A Skill SHALL NOT contain any `extensions` field (the field does not exist on `AgentSkill`).
+2. Module annotations (`readonly`, `destructive`, `idempotent`, `requires_approval`, `open_world`) SHALL be exposed via the Explorer UI's `_inputSchemas` enrichment, not on the Skill.
+3. Standard A2A clients SHALL be able to parse the Agent Card without encountering any apcore-specific annotation fields.
 
 ---
 
@@ -551,7 +550,7 @@ apcore-a2a is the second adapter in the planned family. It depends on the `apcor
 1. `message/stream` SHALL return an HTTP response with `Content-Type: text/event-stream`.
 2. A `TaskStatusUpdateEvent` SHALL be emitted on each state transition (submitted, working, completed, failed, canceled).
 3. A `TaskArtifactUpdateEvent` SHALL be emitted when the module produces incremental output via `Executor.stream()`.
-4. Events SHALL conform to A2A v0.3.0 SSE event schema.
+4. Events SHALL conform to A2A 1.0 SSE event schema.
 5. For streaming-capable modules, intermediate output chunks from `Executor.stream()` SHALL produce `TaskArtifactUpdateEvent` with `append: true`.
 6. For non-streaming modules, the stream SHALL emit status updates only (submitted, working, completed/failed) with the final result as an Artifact in the terminal event.
 7. The final event SHALL always be a `TaskStatusUpdateEvent` with a terminal state (completed, failed, or canceled).
@@ -657,7 +656,7 @@ apcore-a2a is the second adapter in the planned family. It depends on the `apcor
 | **Priority** | P0 |
 | **PRD Trace** | FR-005 |
 
-**Description:** The system SHALL implement the A2A task state machine governing all task state transitions with exactly the valid transitions defined by the A2A v0.3.0 specification.
+**Description:** The system SHALL implement the A2A task state machine governing all task state transitions with exactly the valid transitions defined by the A2A 1.0 specification.
 
 **Rationale:** The task state machine is the stateful core of the A2A server. Invalid transitions would violate protocol compliance and cause interoperability failures.
 
@@ -681,7 +680,7 @@ apcore-a2a is the second adapter in the planned family. It depends on the `apcor
 | **Priority** | P0 |
 | **PRD Trace** | FR-005 |
 
-**Description:** Each Task object SHALL contain the fields required by the A2A v0.3.0 specification.
+**Description:** Each Task object SHALL contain the fields required by the A2A 1.0 specification.
 
 **Rationale:** Compliance with the A2A Task schema ensures interoperability with all A2A clients and orchestrators.
 
@@ -1238,7 +1237,7 @@ apcore-a2a is the second adapter in the planned family. It depends on the `apcor
 
 **Acceptance Criteria:**
 1. On each task state transition, an HTTP POST SHALL be sent to the registered webhook URL.
-2. The POST body SHALL contain the event payload conforming to A2A v0.3.0 push notification schema.
+2. The POST body SHALL contain the event payload conforming to A2A 1.0 push notification schema.
 3. The POST SHALL include `Content-Type: application/json` header.
 4. Successful delivery SHALL be indicated by HTTP 2xx response from the webhook.
 5. Webhook delivery SHALL be asynchronous and SHALL NOT block task execution.
@@ -1931,15 +1930,15 @@ apcore-a2a is the second adapter in the planned family. It depends on the `apcor
 | **Priority** | P0 |
 | **PRD Trace** | NFR-004 |
 
-**Description:** The system SHALL be fully compliant with A2A v0.3.0 specification.
+**Description:** The system SHALL be fully compliant with A2A 1.0 specification.
 
 **Rationale:** Protocol compliance is mandatory for interoperability with all A2A-compliant agents and clients.
 
 **Acceptance Criteria:**
-1. All A2A v0.3.0 JSON-RPC methods SHALL be implemented.
-2. Agent Card SHALL validate against the A2A v0.3.0 Agent Card JSON Schema.
-3. Task objects SHALL conform to A2A v0.3.0 Task schema.
-4. SSE events SHALL conform to A2A v0.3.0 event schemas.
+1. All A2A 1.0 JSON-RPC methods SHALL be implemented.
+2. Agent Card SHALL validate against the A2A 1.0 Agent Card JSON Schema.
+3. Task objects SHALL conform to A2A 1.0 Task schema.
+4. SSE events SHALL conform to A2A 1.0 event schemas.
 5. JSON-RPC 2.0 compliance SHALL be verified via protocol conformance tests.
 
 ---
@@ -2547,45 +2546,52 @@ The following matrix maps data entities to operations across the system's module
 | `append` | boolean | Optional, default false | Whether this appends to a previous artifact |
 | `lastChunk` | boolean | Optional | Whether this is the final chunk of a streaming artifact |
 
-#### 7.1.4 Part (union type)
+#### 7.1.4 Part (oneof)
 
-**TextPart:**
+In A2A 1.0 a `Part` is a flattened protobuf-derived `oneof` discriminated by the
+key that is present — there is **no** `type` discriminator field. Exactly one of
+the following keys is set:
+
+**Text part:** `{"text": "<content>"}`
 
 | Field | Type | Constraints | Description |
 |-------|------|-------------|-------------|
-| `type` | string | Required, value: "text" | Part type discriminator |
 | `text` | string | Required | Text content |
 
-**DataPart:**
+**Data part:** `{"data": {...}}`
 
 | Field | Type | Constraints | Description |
 |-------|------|-------------|-------------|
-| `type` | string | Required, value: "data" | Part type discriminator |
 | `data` | object | Required | Structured data content |
-| `mediaType` | string | Required | MIME type (e.g., "application/json") |
 
-**FilePart:**
+**File part:** `{"raw": "<bytes>"}` or `{"url": "<uri>"}`
 
 | Field | Type | Constraints | Description |
 |-------|------|-------------|-------------|
-| `type` | string | Required, value: "file" | Part type discriminator |
-| `uri` | string (URI) | Required | File location URI |
-| `name` | string | Optional | File name |
+| `raw` | bytes (base64) | One of `raw`/`url` required | Inline file content |
+| `url` | string (URI) | One of `raw`/`url` required | File location URI |
 | `mimeType` | string | Optional | File MIME type |
 
 #### 7.1.5 AgentCard
+
+A2A 1.0 removed the top-level `url` and `protocolVersion` fields; transport
+endpoints are now described by `supportedInterfaces`, and `provider`,
+`securityRequirements`, and `signatures` are first-class.
 
 | Field | Type | Constraints | Description |
 |-------|------|-------------|-------------|
 | `name` | string | Required | Agent display name |
 | `description` | string | Required | Agent description |
 | `version` | string | Required | Agent version (semver) |
-| `url` | string (URL) | Required | Agent base URL |
+| `supportedInterfaces` | array of Interface | Required, at least one | Transport bindings: `{url, protocolBinding, protocolVersion, tenant}` (replaces top-level `url`/`protocolVersion`) |
+| `provider` | Provider object | Required (may be null) | Agent provider/organization metadata |
 | `skills` | array of Skill | Required, at least one | Agent capabilities |
-| `capabilities` | Capabilities object | Required | Supported interaction modes |
+| `capabilities` | Capabilities object | Required | Supported interaction modes; includes `streaming`, `pushNotifications`, `extensions` (list), and `extendedAgentCard` (bool) |
 | `defaultInputModes` | array of string | Required | Default input MIME types |
 | `defaultOutputModes` | array of string | Required | Default output MIME types |
-| `securitySchemes` | array of SecurityScheme | Optional | Supported auth schemes |
+| `securitySchemes` | object | Optional | Supported auth schemes |
+| `securityRequirements` | array | Required | Security requirements (empty by default) |
+| `signatures` | array | Required | Card signatures (empty by default) |
 
 #### 7.1.6 Skill
 
@@ -2598,7 +2604,7 @@ The following matrix maps data entities to operations across the system's module
 | `examples` | array of Example | Optional, max 10 | Usage examples |
 | `inputModes` | array of string | Optional | Accepted input MIME types |
 | `outputModes` | array of string | Optional | Produced output MIME types |
-| `extensions` | object | Optional | Custom extension metadata |
+| `securityRequirements` | array | Required by A2A 1.0 `AgentSkill` | Per-skill security requirements (empty by default) |
 
 #### 7.1.7 PushNotificationConfig
 
@@ -2722,17 +2728,28 @@ All JSON-RPC endpoints accept `Content-Type: application/json` and return `Conte
 
 #### 8.1.3 SSE Stream Events
 
-| Event Type | Direction | Description |
-|------------|-----------|-------------|
-| `TaskStatusUpdateEvent` | Server -> Client | Emitted on each task state transition |
-| `TaskArtifactUpdateEvent` | Server -> Client | Emitted when module produces incremental output |
+A2A 1.0 events are a protobuf-derived `oneof` discriminated by the wrapper key
+that is present (`task` / `statusUpdate` / `artifactUpdate` / `msg`). There is no
+`type` field and no `final` flag.
+
+| Wrapper key | Direction | Description |
+|-------------|-----------|-------------|
+| `task` | Server -> Client | Full task snapshot |
+| `statusUpdate` | Server -> Client | Emitted on each task state transition |
+| `artifactUpdate` | Server -> Client | Emitted when module produces incremental output |
+| `msg` | Server -> Client | A standalone agent message |
 
 SSE event format:
 ```
 id: <sequential_integer>
-data: {"type": "<event_type>", "taskId": "<id>", ...}
+data: {"statusUpdate": {"taskId": "<id>", "contextId": "<ctx>", "status": {"state": "TASK_STATE_WORKING", ...}}}
 
 ```
+
+The stream ends when a terminal `statusUpdate` is received — `state` is one of
+`TASK_STATE_COMPLETED`, `TASK_STATE_FAILED`, `TASK_STATE_CANCELED`, or
+`TASK_STATE_REJECTED` — or the server closes the connection. (A2A 0.3 used a
+`final: true` flag, which 1.0 removed.)
 
 #### 8.1.4 Push Notification Webhook
 
@@ -2740,7 +2757,7 @@ data: {"type": "<event_type>", "taskId": "<id>", ...}
 |-----------|--------|:---:|-------------|
 | Server -> Webhook | POST | application/json | Task state change notification |
 
-Webhook payload conforms to A2A v0.3.0 push notification schema.
+Webhook payload conforms to A2A 1.0 push notification schema.
 
 ### 8.2 Software Interfaces
 
@@ -2943,7 +2960,7 @@ The system consumes A2A types, JSON-RPC handling, and SSE utilities from the `a2
 
 ### Appendix B: A2A Protocol Reference
 
-**A2A v0.3.0 JSON-RPC Methods:**
+**A2A 1.0 JSON-RPC Methods:**
 
 | Method | Parameters | Response | Description |
 |--------|-----------|----------|-------------|
