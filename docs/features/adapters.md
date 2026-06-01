@@ -212,6 +212,8 @@ not by exception class names.
 | `MODULE_TIMEOUT` / `EXECUTION_TIMEOUT` | -32603 | `"Execution timeout"` | No |
 | `INVALID_INPUT` | -32602 | `"Invalid input: {sanitized description}"` | Yes |
 | `CALL_DEPTH_EXCEEDED` / `CIRCULAR_CALL` / `CALL_FREQUENCY_EXCEEDED` | -32603 | `"Safety limit exceeded"` | No |
+| `MODULE_DISABLED` | -32603 | `"Module is currently disabled"` | No |
+| `CONFIG_NAMESPACE_DUPLICATE` / `CONFIG_MOUNT_ERROR` / `CONFIG_BIND_ERROR` | -32603 | `"Configuration error"` | No |
 | `asyncio.TimeoutError` | -32603 | `"Execution timeout"` | No |
 | Any other `Exception` | -32603 | `"Internal server error"` | No |
 

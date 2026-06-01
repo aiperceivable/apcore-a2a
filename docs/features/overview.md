@@ -6,7 +6,7 @@ This directory contains implementation-level feature specifications for **apcore
 
 | Feature | Priority | Depends On | Description |
 |---------|----------|------------|-------------|
-| [adapters](adapters.md) | P0 | None (foundation) | Pure-logic converters: AgentCardBuilder, SkillMapper, MessageAdapter, ResultMapper, ErrorMapper |
+| [adapters](adapters.md) | P0 | None (foundation) | Pure-logic converters: AgentCardBuilder, SkillMapper, SchemaConverter, ErrorMapper, PartConverter |
 | [storage](storage.md) | P0 | None | Pluggable task persistence — TaskStore protocol + InMemoryTaskStore |
 | [server-core](server-core.md) | P0 | adapters, storage | Core server: A2AServerFactory, ExecutionRouter, TaskManager, TransportManager |
 | [streaming](streaming.md) | P0 | server-core | SSE streaming for `message/stream` and `tasks/resubscribe` |

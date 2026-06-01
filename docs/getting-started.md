@@ -18,7 +18,7 @@ You need an existing apcore project with at least one module defined:
     pip install apcore-a2a
     ```
 
-    Requires Python 3.11+ and `apcore` 0.9.0+.
+    Requires Python 3.11+ and `apcore` 0.22.0+.
 
 === "TypeScript"
 
@@ -28,7 +28,7 @@ You need an existing apcore project with at least one module defined:
     pnpm add apcore-a2a
     ```
 
-    Requires Node.js 18+ and `apcore-js` 0.8.0+.
+    Requires Node.js 18+ and `apcore-js` 0.22.0+.
 
 ---
 

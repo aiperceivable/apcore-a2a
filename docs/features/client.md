@@ -64,7 +64,7 @@ class A2AClient:
 
         Yields:
             TaskStatusUpdateEvent or TaskArtifactUpdateEvent dicts.
-        Terminates when stream closes or event with final=true received.
+        Terminates when stream closes or a terminal TASK_STATE_* status is received.
         """
 
     async def get_task(self, task_id: str) -> dict:
@@ -302,7 +302,7 @@ src/apcore_a2a/client/
 - **Agent Card caching**: TTL-based, monotonic clock, no thread locks needed (async event loop)
 - **Typed exceptions**: every JSON-RPC error maps to a specific typed exception — callers never need to inspect error codes
 - **URL validation at construction time**: `ValueError` on invalid URL, not at call time
-- **SSE stream termination**: stream ends when `final: true` event received OR server closes connection
+- **SSE stream termination**: stream ends when a terminal `TASK_STATE_*` status is received OR server closes connection (A2A 1.0 has no `final` flag)
 
 ## Test Module
 
