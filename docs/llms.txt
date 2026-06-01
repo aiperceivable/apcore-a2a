@@ -1,0 +1,46 @@
+# apcore-a2a
+
+> Automatic Agent-to-Agent (A2A) protocol adapter for apcore — exposes apcore modules as A2A-discoverable agents with streaming, push notifications, and auth.
+
+apcore-a2a serves apcore modules over the A2A protocol: it provides the server core, agent discovery, streaming responses, push notifications, authentication, and a client, so other agents can find and call apcore-backed capabilities.
+
+## Start Here
+
+- [Home](https://apcore-a2a.aiperceivable.com/): What apcore-a2a does and how it exposes apcore modules over A2A.
+- [Getting Started](https://apcore-a2a.aiperceivable.com/getting-started/): Run an A2A server in front of your apcore modules.
+- [Changelog](https://apcore-a2a.aiperceivable.com/changelog/): Notable changes across releases.
+
+## Features
+
+- [Features Overview](https://apcore-a2a.aiperceivable.com/features/overview/): Map of the adapter, server, streaming, and client components.
+- [Adapters](https://apcore-a2a.aiperceivable.com/features/adapters/): Adapts apcore modules into A2A agent capabilities.
+- [Server Core](https://apcore-a2a.aiperceivable.com/features/server-core/): The core A2A server runtime and request handling.
+- [Streaming](https://apcore-a2a.aiperceivable.com/features/streaming/): Streamed responses for long-running agent calls.
+- [Push Notifications](https://apcore-a2a.aiperceivable.com/features/push-notifications/): Asynchronous task updates via push notifications.
+- [Auth](https://apcore-a2a.aiperceivable.com/features/auth/): Authentication for A2A callers.
+- [Client](https://apcore-a2a.aiperceivable.com/features/client/): Client for calling A2A agents from apcore.
+- [Public API](https://apcore-a2a.aiperceivable.com/features/public-api/): The stable public surface of the adapter.
+- [CLI](https://apcore-a2a.aiperceivable.com/features/cli/): Command-line entry point for running the A2A server.
+
+## Specifications
+
+- [Product Requirements (PRD)](https://apcore-a2a.aiperceivable.com/spec/prd/): Goals, scope, and requirements for the A2A adapter.
+- [Technical Design](https://apcore-a2a.aiperceivable.com/spec/tech-design/): Architecture and component design.
+- [Software Requirements (SRS)](https://apcore-a2a.aiperceivable.com/spec/srs/): Detailed functional and non-functional requirements.
+
+## Ecosystem
+
+- [apcore](https://apcore.aiperceivable.com/): The core module standard exposed over A2A.
+- [apcore-mcp](https://apcore-mcp.aiperceivable.com/): MCP server & OpenAI tools bridge for apcore.
+- [apcore-cli](https://apcore-cli.aiperceivable.com/): Expose apcore modules as command-line tools.
+- [apcore-toolkit](https://apcore-toolkit.aiperceivable.com/): Shared scanner, schema extraction, and output toolkit for adapters.
+- [apflow](https://apflow.aiperceivable.com/): Orchestration layer for long-running, multi-step agent task workflows.
+- [AI Perceivable (ecosystem hub)](https://aiperceivable.com/): Overview of the full ecosystem — apcore (perception), apflow (orchestration), and adapters.
+
+## Key Facts
+
+- Exposes apcore modules over the A2A (Agent-to-Agent) protocol.
+- Provides server core, agent discovery, streaming, push notifications, and auth.
+- Includes both a server and a client.
+- Part of the AI-Perceivable ecosystem alongside the MCP and CLI adapters.
+- Open source. Source: https://github.com/aiperceivable/apcore-a2a
