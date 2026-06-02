@@ -37,7 +37,7 @@ However, there is currently **no standard way to expose apcore modules as A2A ag
 
 1. Manually author an A2A Agent Card JSON document -- mapping module names to Skills, computing capabilities from annotations, declaring security schemes.
 2. Stand up an HTTP server with JSON-RPC 2.0 request handling for `message/send`, `message/stream`, `tasks/get`, `tasks/cancel`, and all other A2A methods.
-3. Implement the A2A task state machine (submitted, working, completed, failed, canceled, input_required) with thread-safe transitions, history tracking, and storage.
+3. Implement the A2A task state machine (submitted, working, completed, failed, canceled, rejected, input_required) with thread-safe transitions, history tracking, and storage.
 4. Build SSE streaming infrastructure for `message/stream` with `TaskStatusUpdateEvent` and `TaskArtifactUpdateEvent` events.
 5. Wire execution routing from A2A message Parts to apcore Executor calls, preserving ACL, validation, and middleware.
 6. Map apcore's error hierarchy to A2A JSON-RPC error codes with security-aware error sanitization.
@@ -433,8 +433,9 @@ Flow:
            key="...",
            issuer="https://idp.corp.com",
            audience="apcore-agents"))
-  2. Agent Card at /.well-known/agent-card.json declares:
-       "securitySchemes": [{"type": "http", "scheme": "bearer"}]
+  2. Agent Card at /.well-known/agent-card.json declares (A2A 1.0 proto3 oneof shape):
+       "securitySchemes": {"bearerAuth": {"httpAuthSecurityScheme": {"scheme": "bearer", "bearerFormat": "JWT"}}}
+       "securityRequirements": []
   3. Extended Agent Card at /agent/authenticatedExtendedCard
        includes additional privileged Skills not on public card
   4. Omar's orchestrator authenticates via corporate OAuth 2.0 flow
@@ -511,7 +512,7 @@ serve(registry)
 
 | apcore Source | A2A Agent Card Field |
 |---------------|---------------------|
-| `(config) project.name` | `AgentCard.name` (fallback: `"apcore-agent"`) |
+| `(config) project.name` | `AgentCard.name` (fallback: `"Apcore Agent"`) |
 | `(config) project.description` | `AgentCard.description` (fallback: auto-generated summary) |
 | `(config) project.version` | `AgentCard.version` (fallback: `"0.0.0"`) |
 | `(serve url)` | `AgentCard.supportedInterfaces[0].url` |
@@ -525,7 +526,7 @@ serve(registry)
 
 **Acceptance Criteria:**
 1. Agent Card conforms to A2A 1.0 Agent Card JSON Schema.
-2. `AgentCard.name` populated from Registry config `project.name`; fallback to `"apcore-agent"` if not configured.
+2. `AgentCard.name` populated from Registry config `project.name`; fallback to `"Apcore Agent"` if not configured.
 3. `AgentCard.description` populated from Registry config `project.description`; fallback to auto-generated description listing module count.
 4. `AgentCard.version` populated from Registry config `project.version`; fallback to `"0.0.0"`.
 5. `AgentCard.supportedInterfaces[0].url` populated from the server's bound address (scheme + host + port). (A2A 1.0 removed the top-level `AgentCard.url` field; the server address is exposed via `supportedInterfaces[]`.)
@@ -632,9 +633,9 @@ serve(registry)
 **User Story:** US-005
 
 **Acceptance Criteria:**
-1. Task states: `submitted`, `working`, `completed`, `failed`, `canceled`, `input_required`.
+1. Task states: `submitted`, `working`, `completed`, `failed`, `canceled`, `rejected`, `input_required`. Terminal states are `completed`, `failed`, `canceled`, and `rejected`.
 2. Valid transitions enforced:
-   - `submitted` --> `working`, `canceled`, `failed`
+   - `submitted` --> `working`, `canceled`, `failed`, `rejected`
    - `working` --> `completed`, `failed`, `canceled`, `input_required`
    - `input_required` --> `working`, `canceled`, `failed`
 3. Invalid state transitions raise an internal error (logged at ERROR level, not exposed to client).
@@ -687,12 +688,12 @@ serve(registry)
 | apcore Error | A2A JSON-RPC Error Code | Behavior |
 |-------------|------------------------|----------|
 | `ModuleNotFoundError` | -32601 (Method not found) | Module ID included in message |
-| `SchemaValidationError` | -32602 (Invalid params) | Field-level validation details in `data` |
+| `SchemaValidationError` | -32602 (Invalid params) | Field-level validation details in `message` |
 | `ACLDeniedError` | -32001 (TaskNotFound) | Details hidden per security policy |
 | `ModuleExecuteError` | -32603 (Internal error) | Sanitized message; no stack trace |
-| `ModuleTimeoutError` | -32603 (Internal error) | "Execution timed out" message |
+| `ModuleTimeoutError` | -32603 (Internal error) | "Execution timeout" message |
 | `ApprovalPendingError` | *Not an error* | Task transitions to `input_required` |
-| `InvalidInputError` | -32602 (Invalid params) | Input error details in `data` |
+| `InvalidInputError` | -32602 (Invalid params) | Input error details in `message` |
 | `CallDepthExceededError` | -32603 (Internal error) | "Safety limit exceeded" message |
 | `CircularCallError` | -32603 (Internal error) | "Safety limit exceeded" message |
 | Unknown exceptions | -32603 (Internal error) | Generic "Internal error" message |
@@ -701,10 +702,10 @@ serve(registry)
 
 **Acceptance Criteria:**
 1. Each apcore error type listed above produces a distinct, identifiable JSON-RPC error response.
-2. `SchemaValidationError` responses include field-level error details (field name, error code, message) in the `data` field.
+2. `SchemaValidationError` responses include field-level error details (field name, error code, message) summarized in the `message` field. (Per the v0.4 decision, JSON-RPC errors are `{code, message}` only -- no `data` field.)
 3. `ACLDeniedError` responses do not leak sensitive security information (no caller_id, target_id, or ACL rule details).
 4. Unexpected exceptions produce a generic "Internal error" message without leaking stack traces, file paths, or internal configuration.
-5. All error responses include a `data` field with an error type identifier string for programmatic handling.
+5. JSON-RPC error objects contain only `code` and `message` (no `data` field); any error type identifier or details are conveyed within `message`.
 6. Error messages never contain internal file paths, stack traces, or sensitive configuration values.
 7. `ApprovalPendingError` is handled as a task state transition to `input_required`, not as a JSON-RPC error.
 
@@ -905,7 +906,7 @@ async for event in client.stream_message(message):
 2. The extended card includes all public Skills plus Skills marked as requiring authentication.
 3. The endpoint requires valid authentication; returns HTTP 401 without valid credentials.
 4. Modules with `requires_approval` annotation or ACL restrictions appear only in the extended card.
-5. `agentCard/get` JSON-RPC method returns the appropriate card based on authentication status.
+5. The appropriate Agent Card (public vs extended) is selected by the caller's authentication status. In the Python/TypeScript SDKs this card-fetch RPC is handled by the underlying A2A SDK's request handler — it is not a separately-dispatched apcore-a2a method, so it does not appear in the JSON-RPC dispatch tables (§Tech Design, server-core).
 6. The extended card declares all security schemes the agent supports.
 
 **Dependencies:** FR-002, FR-013
@@ -1101,9 +1102,9 @@ apcore-a2a serve --extensions-dir ./extensions --push-notifications
 | Requirement | Detail |
 |-------------|--------|
 | A2A protocol version | Full compliance with A2A 1.0 specification |
-| apcore-python version | Compatible with apcore-python >= 0.6.0 |
+| apcore-python version | Compatible with apcore-python >= 0.22.0 |
 | a2a-sdk version | Uses official `a2a-sdk` Python package (latest stable) |
-| Python version | Python >= 3.10 |
+| Python version | Python >= 3.11 |
 | ASGI compatibility | The ASGI app (from `async_serve()`) can be mounted in any ASGI server (uvicorn, hypercorn, daphne) |
 | Interoperability | Verified against A2A reference client; compatible with non-apcore A2A agents |
 | JSON-RPC compliance | Fully compliant with JSON-RPC 2.0 specification |
@@ -1116,7 +1117,7 @@ apcore-a2a serve --extensions-dir ./extensions --push-notifications
 | Test count | Target ~400-500 tests (comparable to apcore-mcp-python's ~450) |
 | Code documentation | All public APIs have docstrings with usage examples |
 | Type annotations | 100% type-annotated public API; mypy strict mode passes |
-| Architecture | Mirror apcore-mcp-python's layered architecture: `adapters/`, `server/`, `auth/`, `store/`, `client/` |
+| Architecture | Mirror apcore-mcp-python's layered architecture: `adapters/`, `server/`, `auth/`, `storage/`, `client/` |
 | Dependency count | Minimize direct dependencies: apcore-python, a2a-sdk, starlette, uvicorn, httpx, PyJWT (optional) |
 | Package size | Core logic <= 1,500 lines (excluding tests, docs, and Explorer UI assets) |
 
@@ -1178,13 +1179,13 @@ apcore-a2a serve --extensions-dir ./extensions --push-notifications
 
 | Dependency | Version Constraint | Purpose | Risk Level |
 |------------|-------------------|---------|------------|
-| **apcore-python** | >= 0.6.0 | Registry, Executor, Module, Schema APIs | Low -- stable, under same organization's control |
+| **apcore-python** | >= 0.22.0 | Registry, Executor, Module, Schema APIs, ErrorFormatterRegistry, Config Bus | Low -- stable, under same organization's control |
 | **a2a-sdk** | Latest stable | A2A protocol types, JSON-RPC handling, SSE utilities | Medium -- external project; pre-1.0 API may change |
 | **starlette** | >= 0.27 | ASGI framework for HTTP server, SSE response handling | Low -- mature, widely deployed |
 | **uvicorn** | >= 0.23 | ASGI server for development and production | Low -- mature, standard choice for Python async servers |
 | **httpx** | >= 0.24 | HTTP client for A2A Client and push notification delivery | Low -- mature, async-native |
 | **PyJWT** | >= 2.8 (optional) | JWT token validation for authentication middleware | Low -- mature, well-maintained |
-| Python | >= 3.10 | Modern type hints, `match` statements, async features | Low -- aligns with apcore-python minimum |
+| Python | >= 3.11 | Modern type hints, `match` statements, async features | Low -- aligns with apcore-python minimum |
 
 ### 10.2 Risks
 
@@ -1359,9 +1360,11 @@ examples[].title                -->   Skill.examples[].name
 examples[].input                -->   Skill.examples[].input (TextPart)
 input_schema (JSON Schema)      -->   inputModes: ["application/json"]
 output_schema (JSON Schema)     -->   outputModes: ["application/json"]
-(custom extension)              -->   Skill.extensions.inputSchema
-(custom extension)              -->   Skill.extensions.outputSchema
 ```
+
+> A2A 1.0 `AgentSkill` has no `extensions` field, so `input_schema` / `output_schema`
+> are not mapped onto the Skill. The full schemas are surfaced via the Explorer UI's
+> `_inputSchemas` enrichment instead (see `adapters.md`).
 
 #### A.3 apcore Annotations --> A2A Capabilities
 
@@ -1371,12 +1374,12 @@ apcore Annotations                    A2A Agent Card
 any module has streaming=true   -->   capabilities.streaming = true
 push_notifications enabled      -->   capabilities.pushNotifications = true
 task store supports history     -->   history recording enabled (no 1.0 capability flag)
-readonly annotation             -->   Skill.extensions.annotations.readonly
-destructive annotation          -->   Skill.extensions.annotations.destructive
-idempotent annotation           -->   Skill.extensions.annotations.idempotent
 requires_approval annotation    -->   input_required state behavior
-open_world annotation           -->   Skill.extensions.annotations.open_world
 ```
+
+> A2A 1.0 `AgentSkill` has no `extensions` field, so the `readonly` / `destructive` /
+> `idempotent` / `open_world` annotations are not mapped onto the Skill. They remain
+> available to clients via the Explorer UI's per-skill enrichment.
 
 #### A.4 apcore Execution --> A2A Task Lifecycle
 
@@ -1446,8 +1449,8 @@ Unknown exceptions              -->   -32603 (Internal error, generic)
  |                            |                                 |
  |  Auth Layer                |      Storage Layer              |
  |  +-------------------------+--+ +---------------------------+|
- |  |  auth/                     | |  store/                   ||
- |  |  +-- middleware.py         | |  +-- interface.py (ABC)   ||
+ |  |  auth/                     | |  storage/                 ||
+ |  |  +-- middleware.py         | |  +-- protocol.py (proto)  ||
  |  |  +-- jwt.py                | |  +-- memory.py (default)  ||
  |  |  +-- identity_bridge.py   | +---------------------------+|
  |  +----------------------------+                              |

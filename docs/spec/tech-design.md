@@ -49,12 +49,12 @@
 
 ### 1.1 Problem Statement
 
-apcore modules carry rich, machine-readable metadata -- `input_schema`, `output_schema`, `description`, `annotations`, `tags`, `examples` -- that maps almost 1:1 to A2A (Agent-to-Agent) protocol concepts. Yet there is no automated path from an apcore Registry to a standards-compliant A2A agent server. Today, a developer who wants their modules callable by other AI agents must hand-author Agent Cards, implement JSON-RPC dispatch, build a task state machine, wire SSE streaming, and map errors -- roughly 500+ lines of boilerplate per deployment. This project eliminates that gap with a thin adapter that reads apcore metadata at runtime and produces a fully functional A2A v0.3.0 agent.
+apcore modules carry rich, machine-readable metadata -- `input_schema`, `output_schema`, `description`, `annotations`, `tags`, `examples` -- that maps almost 1:1 to A2A (Agent-to-Agent) protocol concepts. Yet there is no automated path from an apcore Registry to a standards-compliant A2A agent server. Today, a developer who wants their modules callable by other AI agents must hand-author Agent Cards, implement JSON-RPC dispatch, build a task state machine, wire SSE streaming, and map errors -- roughly 500+ lines of boilerplate per deployment. This project eliminates that gap with a thin adapter that reads apcore metadata at runtime and produces a fully functional A2A 1.0 agent.
 
 ### 1.2 Goals
 
 1. **Zero-boilerplate A2A agent**: `serve(registry)` launches a compliant A2A server with automatic Agent Card, skill mapping, task lifecycle, streaming, and error handling.
-2. **Full A2A v0.3.0 compliance**: All JSON-RPC methods (`message/send`, `message/stream`, `tasks/get`, `tasks/cancel`, `tasks/resubscribe`, push notification CRUD), Agent Card discovery, SSE streaming.
+2. **Full A2A 1.0 compliance**: All JSON-RPC methods (`message/send`, `message/stream`, `tasks/get`, `tasks/cancel`, `tasks/resubscribe`, push notification CRUD), Agent Card discovery, SSE streaming.
 3. **Executor pipeline preservation**: Every A2A task routes through `Executor.call_async()` or `Executor.stream()`, preserving ACL, validation, middleware, and timeout guarantees.
 4. **Bidirectional agent participation**: Both an A2A server (other agents call us) and an `A2AClient` (we call other agents).
 5. **Enterprise-ready auth**: JWT/Bearer authentication bridged to apcore Identity for ACL enforcement.
@@ -300,7 +300,7 @@ def serve(
 
 1. Resolve `registry_or_executor` to both a Registry and an Executor using duck-typing (same pattern as apcore-mcp's `resolve_registry()` / `resolve_executor()`). If the object has `list()` and `get_definition()`, treat as Registry and wrap in Executor. If it has `call_async()`, treat as Executor and extract its Registry.
 2. Validate that the Registry has at least one module; raise `ValueError("Registry contains zero modules; at least one module is required to serve an A2A agent")` if empty.
-3. Resolve `name` from Registry config `project.name`, falling back to `"apcore-agent"`.
+3. Resolve `name` from Registry config `project.name`, falling back to `"Apcore Agent"`.
 4. Resolve `version` from Registry config `project.version`, falling back to `"0.0.0"`.
 5. Resolve `description` from Registry config `project.description`, falling back to `f"apcore agent with {len(modules)} skills"`.
 6. Default `task_store` to `InMemoryTaskStore()` if `None`.
@@ -365,12 +365,12 @@ class AgentCardBuilder:
         version: str,
         url: str,
         capabilities: dict[str, bool],
-        security_schemes: list[dict] | None = None,
+        security_schemes: dict | None = None,
     ) -> dict:
         """Build A2A Agent Card from Registry metadata.
 
         Returns:
-            dict conforming to A2A v0.3.0 Agent Card JSON Schema.
+            dict conforming to A2A 1.0 Agent Card JSON Schema.
         """
 
     def build_extended(
@@ -490,26 +490,31 @@ class SchemaConverter:
 class ErrorMapper:
     # apcore error code -> (JSON-RPC code, message template, sanitize?)
     _ERROR_MAP: dict[str, tuple[int, str, bool]] = {
-        "MODULE_NOT_FOUND":        (-32601, "Skill not found: {module_id}", False),
-        "SCHEMA_VALIDATION_ERROR": (-32602, "Invalid params",               False),
-        "ACL_DENIED":              (-32001, "Task not found",               True),
-        "MODULE_EXECUTE_ERROR":    (-32603, "Internal error",               True),
-        "MODULE_TIMEOUT":          (-32603, "Execution timed out",          True),
-        "INVALID_INPUT":           (-32602, "Invalid input",                False),
-        "CALL_DEPTH_EXCEEDED":     (-32603, "Safety limit exceeded",        True),
-        "CIRCULAR_CALL":           (-32603, "Safety limit exceeded",        True),
-        "CALL_FREQUENCY_EXCEEDED": (-32603, "Safety limit exceeded",        True),
+        "MODULE_NOT_FOUND":           (-32601, None, True),   # message = sanitized original
+        "SCHEMA_VALIDATION_ERROR":    (-32602, None, True),   # message = sanitized original
+        "GENERAL_INVALID_INPUT":      (-32602, "Invalid input",                True),
+        "ACL_DENIED":                 (-32001, "Task not found",               True),
+        "MODULE_TIMEOUT":             (-32603, "Execution timeout",            False),
+        "EXECUTION_CANCELLED":        (-32603, "Execution cancelled",          False),
+        "CALL_DEPTH_EXCEEDED":        (-32603, "Safety limit exceeded",        True),
+        "CIRCULAR_CALL":              (-32603, "Safety limit exceeded",        True),
+        "CALL_FREQUENCY_EXCEEDED":    (-32603, "Safety limit exceeded",        True),
+        "CIRCUIT_BREAKER_OPEN":       (-32603, "Service temporarily unavailable", False),
+        "TASK_LIMIT_EXCEEDED":        (-32603, "Service temporarily unavailable", False),
+        "MODULE_DISABLED":            (-32603, "Module is currently disabled", False),
+        "CONFIG_NAMESPACE_DUPLICATE": (-32603, "Configuration error",          False),
+        "CONFIG_MOUNT_ERROR":         (-32603, "Configuration error",          False),
+        "CONFIG_BIND_ERROR":          (-32603, "Configuration error",          False),
+        # Any other code (or a bare Exception) -> (-32603, "Internal server error", False)
     }
 
     def to_jsonrpc_error(self, error: Exception) -> dict:
         """Convert apcore exception to JSON-RPC error response dict.
 
         Returns:
-            dict with keys: code (int), message (str), data (dict|None)
+            dict with keys: code (int), message (str). Per the v0.4 decision
+            (see Section 9.5), no `data` field is emitted; details go in `message`.
         """
-
-    def _build_validation_data(self, error: Exception) -> dict:
-        """Extract field-level validation details for -32602 errors."""
 
     def _sanitize_message(self, message: str) -> str:
         """Remove file paths, stack traces, config values from message."""
@@ -521,17 +526,20 @@ class ErrorMapper:
 
 | apcore Exception | JSON-RPC Code | Message | Sanitized |
 |-----------------|:---:|---------|:---------:|
-| `ModuleNotFoundError` | -32601 | `"Skill not found: {module_id}"` | No |
-| `SchemaValidationError` | -32602 | `"Invalid params"` (field details in message) | No |
+| `ModuleNotFoundError` | -32601 | sanitized original message | Yes |
+| `SchemaValidationError` | -32602 | sanitized original message (field details preserved) | Yes |
 | `ACLDeniedError` | -32001 | `"Task not found"` | Yes (masking true type) |
-| `ModuleExecuteError` | -32603 | `"Internal error"` | Yes |
-| `ModuleTimeoutError` | -32603 | `"Execution timed out"` | Yes |
-| `InvalidInputError` | -32602 | `"Invalid input: {description}"` | No |
+| `GeneralInvalidInputError` | -32602 | `"Invalid input: {description}"` | Yes |
+| `ModuleTimeoutError` | -32603 | `"Execution timeout"` | No |
+| `ExecutionCancelledError` | -32603 | `"Execution cancelled"` | No |
 | `CallDepthExceededError` | -32603 | `"Safety limit exceeded"` | Yes |
 | `CircularCallError` | -32603 | `"Safety limit exceeded"` | Yes |
 | `CallFrequencyExceededError` | -32603 | `"Safety limit exceeded"` | Yes |
+| `CircuitBreakerOpenError` / `TaskLimitExceededError` | -32603 | `"Service temporarily unavailable"` | No |
+| `ModuleDisabledError` | -32603 | `"Module is currently disabled"` | No |
+| `ConfigNamespaceDuplicate` / `ConfigMountError` / `ConfigBindError` | -32603 | `"Configuration error"` | No |
 | `ApprovalPendingError` | N/A | N/A (task transitions to `input_required`) | N/A |
-| Unknown `Exception` | -32603 | `"Internal error"` | Yes |
+| Unknown `Exception` | -32603 | `"Internal server error"` | No |
 
 **Sanitization rules:**
 1. Strip any substring matching a file path pattern (`/.../.../...`).
@@ -637,10 +645,12 @@ class A2AServerFactory:
    - `GET /metrics` -> metrics (if enabled)
    - `GET /agent/authenticatedExtendedCard` -> extended card (if auth configured)
 8. Optionally mount Explorer UI at `explorer_prefix`.
-9. Apply `AuthMiddleware` if `auth` is provided, with exempt paths: `{"/.well-known/agent-card.json", "/health", "/metrics"}`.
+9. Apply `AuthMiddleware` if `auth` is provided, with exempt paths: `{"/.well-known/agent-card.json", "/.well-known/agent.json", "/health", "/metrics"}` (the 0.3 `agent.json` alias is public discovery and must stay exempt).
 10. Apply CORS middleware if `cors_origins` is provided.
 
 #### 4.4.2 `ExecutionRouter`
+
+> **Implementation Note**: `ExecutionRouter` has been superseded by `a2a-sdk`'s `DefaultRequestHandler` (with the apcore `AgentExecutor` adapter). This section reflects the original design intent; behavior is otherwise equivalent.
 
 **Implements**: FR-EXE-001, FR-EXE-002, FR-EXE-003, FR-MSG-001, FR-MSG-002
 
@@ -719,6 +729,8 @@ context = Context.create(identity=identity)
 This `Context` is passed to `executor.call_async(skill_id, inputs, context)`, enabling the Executor's ACL system to enforce access control based on the A2A caller's identity.
 
 #### 4.4.3 `TaskManager`
+
+> **Implementation Note**: `TaskManager` has been superseded by `a2a-sdk`'s `DefaultRequestHandler` and the `a2a.server.tasks.TaskStore` abstraction, which own task lifecycle and state transitions. This section reflects the original design intent.
 
 **Implements**: FR-TSK-001, FR-TSK-002, FR-TSK-003, FR-TSK-004, FR-TSK-005, FR-TSK-006
 
@@ -805,6 +817,8 @@ class TaskManager:
 
 #### 4.4.4 `TransportManager`
 
+> **Implementation Note**: `TransportManager` has been superseded by `a2a-sdk`'s `A2AStarletteApplication`, which builds the ASGI app, JSON-RPC routes, and SSE transport. This section reflects the original design intent.
+
 **Implements**: FR-SRV-004, FR-SRV-005, FR-AGC-003
 
 **File**: `server/transport.py`
@@ -861,6 +875,8 @@ class TransportManager:
 ```
 
 #### 4.4.5 `StreamingHandler`
+
+> **Implementation Note**: `StreamingHandler` has been superseded by `a2a-sdk`'s `DefaultRequestHandler` + `InMemoryQueueManager`. This section reflects the original design intent; SSE streaming behavior is otherwise equivalent.
 
 **Implements**: FR-MSG-002, FR-MSG-005, FR-MSG-006
 
@@ -937,6 +953,8 @@ data: {"statusUpdate":{"taskId":"abc-123","status":{"state":"TASK_STATE_COMPLETE
 ```
 
 #### 4.4.6 `PushNotificationManager`
+
+> **Implementation Note**: `PushNotificationManager` has been superseded by `a2a-sdk`'s push-notification support (`InMemoryPushNotificationConfigStore` + the SDK's webhook sender). This section reflects the original design intent.
 
 **Implements**: FR-PSH-001, FR-PSH-002, FR-PSH-003, FR-PSH-004
 
@@ -1156,8 +1174,9 @@ class Authenticator(Protocol):
         """
         ...
 
-    def security_schemes(self) -> list[dict]:
-        """Return A2A security scheme declarations for Agent Card."""
+    def security_schemes(self) -> dict:
+        """Return the A2A 1.0 keyed securitySchemes map for the Agent Card,
+        e.g. {"bearerAuth": {"type": "http", "scheme": "bearer", "bearerFormat": "JWT"}}."""
         ...
 ```
 
@@ -1183,8 +1202,8 @@ class JWTAuthenticator:
     def authenticate(self, headers: dict[str, str]) -> Identity | None:
         """Extract Bearer token, decode JWT, return Identity."""
 
-    def security_schemes(self) -> list[dict]:
-        return [{"type": "http", "scheme": "bearer"}]
+    def security_schemes(self) -> dict:
+        return {"bearerAuth": {"type": "http", "scheme": "bearer", "bearerFormat": "JWT"}}
 ```
 
 Token validation checks: signature, expiration (`exp`), issuer (`iss`), audience (`aud`). Claims mapping: `sub` -> `Identity.id`, `type` -> `Identity.type`, `roles` -> `Identity.roles`, configurable via `ClaimMapping`.
@@ -1213,7 +1232,7 @@ class AuthMiddleware:
         """ASGI middleware entry point.
 
         1. Skip non-HTTP scopes.
-        2. Skip exempt paths (/.well-known/agent-card.json, /health, /metrics).
+        2. Skip exempt paths (/.well-known/agent-card.json, /.well-known/agent.json, /health, /metrics).
         3. Extract headers, call authenticator.authenticate(headers).
         4. If None and require_auth: send 401 with WWW-Authenticate: Bearer.
         5. Set auth_identity_var ContextVar.
@@ -1222,9 +1241,11 @@ class AuthMiddleware:
         """
 ```
 
-Default exempt paths: `{"/.well-known/agent-card.json", "/health", "/metrics"}`. Explorer prefix is added to exempt prefixes when explorer is enabled.
+Default exempt paths: `{"/.well-known/agent-card.json", "/.well-known/agent.json", "/health", "/metrics"}`. Explorer prefix is added to exempt prefixes when explorer is enabled.
 
 ### 4.7 Storage Module (`storage/`)
+
+> **Implementation Note**: The custom `TaskStore` protocol and `InMemoryTaskStore` described here have been superseded by `a2a-sdk`'s `a2a.server.tasks.TaskStore` (with the SDK's in-memory store) for task persistence and `InMemoryPushNotificationConfigStore` for push configs. The `storage/protocol.py` + `storage/memory.py` layer remains for apcore-side state where needed; this section reflects the original design intent.
 
 **Implements**: FR-STR-001, FR-STR-002, FR-STR-003
 
@@ -1690,7 +1711,7 @@ data: {"statusUpdate":{"taskId":"task-uuid","contextId":"ctx-uuid","status":{"st
 
 - **Auth**: Not required.
 - **Response**: HTTP 200, `Content-Type: application/json`, `Cache-Control: max-age=300`.
-- **Body**: A2A v0.3.0 Agent Card JSON.
+- **Body**: A2A 1.0 Agent Card JSON.
 - **Latency target**: < 10ms p99 (pre-computed, served from memory).
 
 #### `GET /agent/authenticatedExtendedCard`
@@ -1803,12 +1824,12 @@ on the wire (no `type` discriminator):
 | `name` | string | Agent display name |
 | `description` | string | Agent description |
 | `version` | string | Semver version |
-| `url` | string (URL) | Agent base URL |
+| `supportedInterfaces` | list[{url, protocolBinding, protocolVersion, tenant}] | A2A 1.0 transport interfaces (replaces the 0.3 top-level `url`) |
 | `skills` | list[Skill] | Capability list |
 | `capabilities` | Capabilities | Supported interaction modes |
 | `defaultInputModes` | list[string] | Default input MIME types |
 | `defaultOutputModes` | list[string] | Default output MIME types |
-| `securitySchemes` | list[SecurityScheme] | Auth schemes (optional) |
+| `securitySchemes` | dict[str, SecurityScheme] | Keyed map of auth schemes, e.g. `{"bearerAuth": {...}}` (optional) |
 
 #### Skill
 
@@ -1821,7 +1842,8 @@ on the wire (no `type` discriminator):
 | `examples` | list[Example] | Usage examples (max 10) |
 | `inputModes` | list[string] | Accepted MIME types |
 | `outputModes` | list[string] | Produced MIME types |
-| `extensions` | dict | Custom metadata (apcore annotations) |
+
+> Note: `AgentSkill` has no `extensions` field in A2A 1.0. apcore annotations (e.g. input/output schemas) surface via the Explorer's `_inputSchemas` / `_outputSchemas` rather than on the skill object.
 
 #### PushNotificationConfig
 
@@ -1840,6 +1862,7 @@ stateDiagram-v2
     submitted --> working : execution_start
     submitted --> canceled : cancel_request
     submitted --> failed : internal_error
+    submitted --> rejected : reject_request
 
     working --> completed : execution_success
     working --> failed : execution_error / timeout
@@ -1853,6 +1876,7 @@ stateDiagram-v2
     completed --> [*]
     failed --> [*]
     canceled --> [*]
+    rejected --> [*]
 
     note right of submitted
         Auto-generated taskId (UUID v4)
@@ -1877,6 +1901,7 @@ stateDiagram-v2
 | `submitted` | `execution_start` | `working` | -- | Invoke Executor |
 | `submitted` | `cancel_request` | `canceled` | -- | Set message = "Canceled by client" |
 | `submitted` | `internal_error` | `failed` | -- | Set sanitized error message |
+| `submitted` | `reject_request` | `rejected` | -- | Set message describing rejection (terminal) |
 | `working` | `execution_success` | `completed` | Output not None | Create Artifact from output |
 | `working` | `execution_error` | `failed` | -- | Set sanitized error message |
 | `working` | `cancel_request` | `canceled` | CancelToken active | Trigger CancelToken.cancel() |
@@ -2208,7 +2233,7 @@ sequenceDiagram
 - No SDK version coupling.
 
 **Disadvantages:**
-- **Compliance risk**: A2A v0.3.0 has nuanced protocol rules (exact error codes, SSE event schemas, Agent Card validation). Reimplementing these correctly is error-prone and requires ongoing maintenance as the spec evolves.
+- **Compliance risk**: A2A 1.0 has nuanced protocol rules (exact error codes, SSE event schemas, Agent Card validation). Reimplementing these correctly is error-prone and requires ongoing maintenance as the spec evolves.
 - **Maintenance burden**: Every A2A protocol update requires manual code changes. The SDK maintainers track spec changes automatically.
 - **Type drift**: Without SDK types as the source of truth, our data structures could drift from the official schema over time.
 - **Development time**: Estimated 2-3x longer initial development compared to using SDK types.
@@ -2402,25 +2427,23 @@ The `ClaimMapping` dataclass allows customization of claim names for enterprise 
 
 ### 10.4 Security Scheme Declaration
 
-When auth is configured, the Agent Card includes:
+When auth is configured, the Agent Card includes the scheme in the A2A 1.0
+protobuf-JSON `oneof` shape (the scheme type is the `oneof` key, not a `type` field):
 
 ```json
 {
-  "securitySchemes": [
-    {"type": "http", "scheme": "bearer"}
-  ]
+  "securitySchemes": {
+    "bearerAuth": {"httpAuthSecurityScheme": {"scheme": "bearer", "bearerFormat": "JWT"}}
+  },
+  "securityRequirements": []
 }
 ```
 
-For API Key auth:
-
-```json
-{
-  "securitySchemes": [
-    {"type": "apiKey", "in": "header", "name": "X-API-Key"}
-  ]
-}
-```
+`JWTAuthenticator.security_schemes()` returns the flat descriptor
+(`{"type": "http", "scheme": "bearer", "bearerFormat": "JWT"}`); `AgentCardBuilder`
+converts it to the `oneof` shape above. Other scheme types follow the same wrapping
+(e.g. `apiKeySecurityScheme`, `oauth2SecurityScheme`). `securityRequirements` is
+currently always `[]` in all SDKs.
 
 ### 10.5 Error Information Leakage Prevention
 
@@ -2513,7 +2536,7 @@ The client should be used as a context manager (`async with A2AClient(url) as cl
 | Unit | ~250 | Individual components (SkillMapper, ErrorMapper, PartConverter, TaskManager, etc.) | pytest, pytest-asyncio |
 | Integration | ~150 | Component interactions (Router + TaskManager + Store, Factory + all adapters) | pytest, httpx (TestClient) |
 | End-to-End | ~50 | Full server (JSON-RPC requests, SSE streams, Agent Card serving) | pytest, httpx, Starlette TestClient |
-| Protocol Conformance | ~20 | A2A v0.3.0 compliance (Agent Card schema, error codes, SSE format) | pytest, jsonschema |
+| Protocol Conformance | ~20 | A2A 1.0 compliance (Agent Card schema, error codes, SSE format) | pytest, jsonschema |
 
 Total target: ~470 tests (comparable to apcore-mcp's ~450).
 
@@ -2572,7 +2595,7 @@ def client(a2a_app):
 
 **E2E tests:**
 - Server startup with real Registry (extensions directory with test modules).
-- Agent Card conformance against A2A v0.3.0 JSON Schema.
+- Agent Card conformance against A2A 1.0 JSON Schema.
 - CLI `apcore-a2a serve` with test extensions directory.
 - Client -> Server round-trip (A2AClient against local test server).
 
@@ -2648,7 +2671,7 @@ readme = "README.md"
 license = "Apache-2.0"
 requires-python = ">=3.11"
 dependencies = [
-    "apcore>=0.6.0",
+    "apcore>=0.22.0",
     "a2a-sdk>=0.3.0",
     "starlette>=0.27",
     "uvicorn>=0.23",

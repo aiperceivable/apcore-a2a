@@ -92,10 +92,10 @@ class JWTAuthenticator:
            - Verify audience (aud) if configured.
            - Any PyJWT.InvalidTokenError → return None (never raise).
         3. Check required_claims all present → None if any missing.
-        4. Map claims to Identity:
-           - id = payload[claim_mapping.id_claim]  # required
-           - type = payload.get(claim_mapping.type_claim, "user")
-           - roles = payload.get(claim_mapping.roles_claim, [])
+        4. Map claims to Identity using the canonical scalar-coercion rule (below):
+           - id   = coerce(payload[id_claim])      # required; None → reject token
+           - type = coerce(payload[type_claim]) or "user"   # null/non-scalar → "user"
+           - roles = [coerce(r) for r in payload[roles_claim] if scalar]  # non-scalar dropped
            - attrs = {k: payload[k] for k in attrs_claims if k in payload}
         5. Return Identity(id=id, type=type, roles=roles, attrs=attrs).
         """
@@ -111,6 +111,29 @@ key = key_file_content or secret_arg or os.environ.get("APCORE_JWT_SECRET")
 ```
 
 **Algorithms**: Default `["HS256"]`. Supports `RS256`, `ES256` for asymmetric keys.
+
+**Claim coercion (canonical cross-language rule).** A claim value is coerced to a
+string identically across all SDKs:
+
+| Claim value | Coerced to |
+|---|---|
+| string | the string itself |
+| number | its string form (`12345` → `"12345"`) |
+| boolean | `"true"` / `"false"` (lowercase) |
+| `null`, array, object | **rejected** (no valid string) |
+
+Applied per field:
+- **`id`** (`sub`): a non-scalar value is **not** a valid identity — the token is
+  rejected (`authenticate()` returns `None`). A scalar numeric/boolean `sub` is
+  coerced. (PyJWT's RFC `sub`-must-be-string check is disabled so a scalar numeric
+  `sub` reaches this coercion instead of being rejected at decode time.)
+- **`type`**: an absent, `null`, or non-scalar value falls back to `"user"`; an
+  explicit empty string is preserved.
+- **`roles`**: only when the claim is an array; non-scalar elements are dropped,
+  scalars are coerced.
+
+This is enforced identically in Python, TypeScript, and Rust so the same token yields
+the same `Identity` (or the same rejection) in every SDK.
 
 ---
 
@@ -167,19 +190,29 @@ identity = auth_identity_var.get()  # Returns Identity or None
 
 ## Security Scheme Declaration in Agent Card
 
-When auth is configured, `AgentCardBuilder` adds:
+`JWTAuthenticator.security_schemes()` returns the flat descriptor
+`{"bearerAuth": {"type": "http", "scheme": "bearer", "bearerFormat": "JWT"}}`.
+When building the card, `AgentCardBuilder` converts each descriptor into the A2A 1.0
+protobuf-JSON **`oneof`** shape (the same shape the reference a2a-sdk serializes), so
+the served card carries:
 ```json
 {
   "securitySchemes": {
     "bearerAuth": {
-      "type": "http",
-      "scheme": "bearer",
-      "bearerFormat": "JWT"
+      "httpAuthSecurityScheme": {
+        "scheme": "bearer",
+        "bearerFormat": "JWT"
+      }
     }
   },
-  "security": [{"bearerAuth": []}]
+  "securityRequirements": []
 }
 ```
+
+> The scheme type is encoded by the `oneof` key (`httpAuthSecurityScheme`), not a
+> `type` field — this is the canonical A2A 1.0 wire shape and is byte-identical
+> across the Python/TypeScript/Rust SDKs. `securityRequirements` is currently always
+> `[]` (empty) in all three SDKs.
 
 ## File Structure
 

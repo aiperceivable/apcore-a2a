@@ -64,7 +64,7 @@ class AgentCardBuilder:
 **Build logic:**
 1. Call `registry.list()` → module IDs.
 2. For each: `registry.get_definition(module_id)` → `ModuleDescriptor`.
-3. Skip modules with `description == ""` or `None` (log warning: `"Skipping module {module_id}: missing description"`).
+3. Skip modules with an empty, `None`, or whitespace-only `description` (the description is trimmed before the check; log warning: `"Skipping module {module_id}: missing description"`).
 4. Convert each to Skill via `SkillMapper.to_skill(descriptor)`.
 5. Compute `capabilities` (A2A 1.0 `AgentCapabilities`):
    - `streaming`: True (executor streaming is always available; non-streaming modules fall back to a single chunk).
@@ -209,9 +209,11 @@ not by exception class names.
 | `MODULE_NOT_FOUND` | -32601 | sanitized original message | Yes |
 | `SCHEMA_VALIDATION_ERROR` | -32602 | sanitized original message | Yes |
 | `ACL_DENIED` | -32001 | `"Task not found"` | **Yes** (masks real type) |
-| `MODULE_TIMEOUT` / `EXECUTION_TIMEOUT` | -32603 | `"Execution timeout"` | No |
-| `INVALID_INPUT` | -32602 | `"Invalid input: {sanitized description}"` | Yes |
+| `MODULE_TIMEOUT` | -32603 | `"Execution timeout"` | No |
+| `EXECUTION_CANCELLED` | -32603 | `"Execution cancelled"` | No |
+| `GENERAL_INVALID_INPUT` | -32602 | `"Invalid input: {sanitized description}"` | Yes |
 | `CALL_DEPTH_EXCEEDED` / `CIRCULAR_CALL` / `CALL_FREQUENCY_EXCEEDED` | -32603 | `"Safety limit exceeded"` | No |
+| `CIRCUIT_BREAKER_OPEN` / `TASK_LIMIT_EXCEEDED` | -32603 | `"Service temporarily unavailable"` | No |
 | `MODULE_DISABLED` | -32603 | `"Module is currently disabled"` | No |
 | `CONFIG_NAMESPACE_DUPLICATE` / `CONFIG_MOUNT_ERROR` / `CONFIG_BIND_ERROR` | -32603 | `"Configuration error"` | No |
 | `asyncio.TimeoutError` | -32603 | `"Execution timeout"` | No |

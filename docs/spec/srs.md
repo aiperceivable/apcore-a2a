@@ -88,7 +88,7 @@ apcore-a2a does NOT reimplement the A2A protocol (it uses the official `a2a-sdk`
 |------|-----------|-------------|
 | REF-01 | `docs/apcore-a2a/prd.md` v1.0 | Product Requirements Document -- primary input for this SRS |
 | REF-02 | `ideas/apcore-a2a.md` | Validated idea document with schema mapping and architecture context |
-| REF-03 | apcore-python source (`apcore` package >= 0.6.0) | SDK source: Registry, Executor, ModuleDescriptor, ModuleAnnotations, error hierarchy |
+| REF-03 | apcore-python source (`apcore` package >= 0.22.0) | SDK source: Registry, Executor, ModuleDescriptor, ModuleAnnotations, error hierarchy |
 | REF-04 | [A2A Protocol Specification (1.0)](https://google.github.io/A2A/) | Official Agent-to-Agent protocol specification |
 | REF-05 | [A2A Python SDK (a2a-sdk)](https://pypi.org/project/a2a-sdk/) | Official Python SDK for building A2A agents and clients |
 | REF-06 | apcore-mcp SRS (`docs/srs-apcore-mcp.md`) | Sibling adapter SRS -- architectural pattern reference |
@@ -98,7 +98,7 @@ apcore-a2a does NOT reimplement the A2A protocol (it uses the official `a2a-sdk`
 
 ### 1.5 Overview
 
-Section 2 provides the overall product description, including ecosystem context, user characteristics, constraints, and assumptions. Section 3 specifies all functional requirements organized by component module (15 module groups, 85 requirements). Section 4 specifies non-functional requirements for performance, security, reliability, compatibility, maintainability, and scalability. Section 5 defines 6 detailed use cases for major workflows. Sections 6-8 provide the CRUD matrix, data requirements, and interface requirements. Section 9 contains the bidirectional traceability matrix. Section 10 is the appendix with glossary and protocol references.
+Section 2 provides the overall product description, including ecosystem context, user characteristics, constraints, and assumptions. Section 3 specifies all functional requirements organized by component module (15 module groups, 63 functional requirements; Section 4 adds 30 non-functional requirements). Section 4 specifies non-functional requirements for performance, security, reliability, compatibility, maintainability, and scalability. Section 5 defines 6 detailed use cases for major workflows. Sections 6-8 provide the CRUD matrix, data requirements, and interface requirements. Section 9 contains the bidirectional traceability matrix. Section 10 is the appendix with glossary and protocol references.
 
 ---
 
@@ -179,7 +179,7 @@ apcore-a2a is the second adapter in the planned family. It depends on the `apcor
 | A-03 | apcore modules produce JSON-serializable output dicts from their `execute()` methods | Assumption |
 | A-04 | Python >= 3.11 is available in the target deployment environment | Assumption |
 | A-05 | A2A clients correctly implement the A2A 1.0 protocol for agent discovery and task operations | Assumption |
-| D-01 | `apcore` package >= 0.6.0 | Dependency |
+| D-01 | `apcore` package >= 0.22.0 | Dependency |
 | D-02 | `a2a-sdk` package (latest stable) | Dependency |
 | D-03 | `starlette` >= 0.27 | Dependency |
 | D-04 | `uvicorn` >= 0.23 | Dependency |
@@ -231,7 +231,7 @@ apcore-a2a is the second adapter in the planned family. It depends on the `apcor
 **Rationale:** Different deployments require different configurations. The serve function must be customizable without requiring users to construct internal objects manually.
 
 **Acceptance Criteria:**
-1. `serve()` SHALL accept `name: str` (agent name; default: from Registry config or `"apcore-agent"`).
+1. `serve()` SHALL accept `name: str` (agent name; default: from Registry config or `"Apcore Agent"`).
 2. `serve()` SHALL accept `description: str` (agent description; default: auto-generated).
 3. `serve()` SHALL accept `version: str` (agent version; default: from Registry config or `"0.0.0"`).
 4. `serve()` SHALL accept `auth: Authenticator | None` (authentication middleware; default: `None`).
@@ -324,7 +324,7 @@ apcore-a2a is the second adapter in the planned family. It depends on the `apcor
 
 **Acceptance Criteria:**
 1. The generated Agent Card SHALL conform to A2A 1.0 Agent Card JSON Schema.
-2. `AgentCard.name` SHALL be populated from Registry config `project.name`; fallback to `"apcore-agent"` if not configured.
+2. `AgentCard.name` SHALL be populated from Registry config `project.name`; fallback to `"Apcore Agent"` if not configured.
 3. `AgentCard.description` SHALL be populated from Registry config `project.description`; fallback to auto-generated description listing module count (e.g., "apcore agent with 10 skills").
 4. `AgentCard.version` SHALL be populated from Registry config `project.version`; fallback to `"0.0.0"`.
 5. `AgentCard.supportedInterfaces[0].url` SHALL be populated from the server's bound address (scheme + host + port). (A2A 1.0 removed the top-level `AgentCard.url` field; the server address is exposed via `supportedInterfaces[]`.)
@@ -392,7 +392,7 @@ apcore-a2a is the second adapter in the planned family. It depends on the `apcor
 2. The extended card SHALL include all public Skills plus Skills for modules marked with `requires_approval` annotation or ACL restrictions.
 3. The endpoint SHALL return HTTP 401 without valid credentials when authentication is configured.
 4. The extended card SHALL declare all security schemes the agent supports.
-5. `agentCard/get` JSON-RPC method SHALL return the appropriate card based on authentication status of the caller.
+5. The appropriate Agent Card (public vs extended) SHALL be selected by the caller's authentication status. In the SDK-backed (Python/TypeScript) implementations this card-fetch RPC is provided by the underlying A2A SDK request handler, so it is not separately listed in this project's JSON-RPC dispatch table.
 6. When authentication is not configured, the extended endpoint SHALL return HTTP 404.
 
 ---
@@ -661,12 +661,12 @@ apcore-a2a is the second adapter in the planned family. It depends on the `apcor
 **Rationale:** The task state machine is the stateful core of the A2A server. Invalid transitions would violate protocol compliance and cause interoperability failures.
 
 **Acceptance Criteria:**
-1. The system SHALL support exactly six task states: `submitted`, `working`, `completed`, `failed`, `canceled`, `input_required`.
+1. The system SHALL support exactly seven task states: `submitted`, `working`, `completed`, `failed`, `canceled`, `rejected`, `input_required`.
 2. Valid transitions SHALL be enforced:
-   - `submitted` --> `working`, `canceled`, `failed`
+   - `submitted` --> `working`, `canceled`, `failed`, `rejected`
    - `working` --> `completed`, `failed`, `canceled`, `input_required`
    - `input_required` --> `working`, `canceled`, `failed`
-3. Terminal states (`completed`, `failed`, `canceled`) SHALL NOT allow any outbound transitions.
+3. Terminal states (`completed`, `failed`, `canceled`, `rejected`) SHALL NOT allow any outbound transitions.
 4. Attempted invalid transitions SHALL be logged at ERROR level and SHALL NOT be exposed to the client.
 5. Attempted invalid transitions SHALL raise an internal `InvalidStateTransitionError` that is caught and converted to JSON-RPC error -32603.
 
@@ -798,7 +798,7 @@ apcore-a2a is the second adapter in the planned family. It depends on the `apcor
 1. The system SHALL invoke `Executor.call_async(module_id, inputs, context)` for synchronous execution.
 2. The system SHALL invoke `Executor.stream(module_id, inputs, context)` for streaming execution.
 3. `Executor.validate(module_id, inputs)` SHALL be called before execution when the module has an `input_schema`.
-4. Validation failures SHALL return JSON-RPC error -32602 (Invalid params) with field-level details in the `data` field.
+4. Validation failures SHALL return JSON-RPC error -32602 (Invalid params) with field-level details summarized in the `message` field (the JSON-RPC error object is `{code, message}` only; no `data` field is emitted in v0.4).
 5. The full Executor pipeline (ACL, validation, middleware, timeout) SHALL be invoked for every task execution.
 6. Execution timeout SHALL be configurable (default: 300 seconds).
 
@@ -1277,8 +1277,8 @@ apcore-a2a is the second adapter in the planned family. It depends on the `apcor
 **Rationale:** Clients must be able to inspect and remove webhook configurations for lifecycle management.
 
 **Acceptance Criteria:**
-1. `tasks/pushNotificationConfig/get` with `{"taskId": "<id>"}` SHALL return the current push notification configuration.
-2. `tasks/pushNotificationConfig/delete` with `{"taskId": "<id>"}` SHALL remove the webhook configuration.
+1. `tasks/pushNotificationConfig/get` with `{"id": "<id>"}` SHALL return the current push notification configuration.
+2. `tasks/pushNotificationConfig/delete` with `{"id": "<id>"}` SHALL remove the webhook configuration.
 3. Getting or deleting a non-existent configuration SHALL return JSON-RPC error -32001 (TaskNotFound).
 
 ---
@@ -1341,9 +1341,9 @@ apcore-a2a is the second adapter in the planned family. It depends on the `apcor
 **Rationale:** A2A clients need to know what authentication schemes the agent accepts to provide correct credentials.
 
 **Acceptance Criteria:**
-1. When JWT auth is configured, `AgentCard.securitySchemes` SHALL include `{"type": "http", "scheme": "bearer"}`.
-2. When API Key auth is configured, `AgentCard.securitySchemes` SHALL include `{"type": "apiKey", "in": "header", "name": "X-API-Key"}`.
-3. When no auth is configured, `securitySchemes` SHALL be an empty array or omitted.
+1. When JWT auth is configured, the served `AgentCard.securitySchemes` (an A2A 1.0 keyed map) SHALL include `{"bearerAuth": {"httpAuthSecurityScheme": {"scheme": "bearer", "bearerFormat": "JWT"}}}` (the protobuf-JSON `oneof` shape, where the scheme type is the `oneof` key). `AgentCard.securityRequirements` SHALL be `[]`. (`JWTAuthenticator.security_schemes()` returns the flat `{"type": "http", ...}` descriptor, which `AgentCardBuilder` converts to the `oneof` shape.)
+2. Other scheme types (e.g. API Key) follow the same `oneof` wrapping (`apiKeySecurityScheme`, …) when emitted by a corresponding authenticator.
+3. When no auth is configured, `securitySchemes` SHALL be an empty map or omitted.
 
 ---
 
@@ -1360,7 +1360,7 @@ apcore-a2a is the second adapter in the planned family. It depends on the `apcor
 **Rationale:** Different enterprises use different identity providers. A pluggable protocol enables integration with any authentication system.
 
 **Acceptance Criteria:**
-1. `Authenticator` SHALL be a `@runtime_checkable` Protocol with method `authenticate(headers: dict[str, str]) -> Identity | None`.
+1. `Authenticator` SHALL be a `@runtime_checkable` Protocol with methods `authenticate(headers: dict[str, str]) -> Identity | None` and `security_schemes() -> dict` (the latter returns the A2A 1.0 keyed `securitySchemes` map advertised on the Agent Card).
 2. `JWTAuthenticator` SHALL be a concrete implementation of `Authenticator`.
 3. Custom implementations SHALL be accepted via `serve(registry, auth=MyCustomAuth())`.
 4. The system SHALL validate at startup that the provided auth object satisfies the `Authenticator` protocol.
@@ -1951,14 +1951,14 @@ apcore-a2a is the second adapter in the planned family. It depends on the `apcor
 | **Priority** | P0 |
 | **PRD Trace** | NFR-004 |
 
-**Description:** The system SHALL be compatible with apcore-python >= 0.6.0.
+**Description:** The system SHALL be compatible with apcore-python >= 0.22.0.
 
 **Rationale:** apcore-a2a must work with the current and future versions of the apcore SDK.
 
 **Acceptance Criteria:**
-1. The system SHALL import and use `apcore` package >= 0.6.0 without errors.
+1. The system SHALL import and use `apcore` package >= 0.22.0 without errors.
 2. Duck-typing SHALL be used throughout (no hard type checks on apcore types) to maximize version tolerance.
-3. Integration tests SHALL be run against at least two apcore-python versions (0.6.x and latest).
+3. Integration tests SHALL be run against at least two apcore-python versions (0.22.x and latest).
 
 ---
 
@@ -2111,10 +2111,10 @@ apcore-a2a is the second adapter in the planned family. It depends on the `apcor
 **Rationale:** Consistent architecture across adapter projects reduces cognitive load for contributors and enables shared patterns.
 
 **Acceptance Criteria:**
-1. Source code SHALL be organized into directories: `adapters/`, `server/`, `auth/`, `store/`, `client/`.
+1. Source code SHALL be organized into directories: `adapters/`, `server/`, `auth/`, `storage/`, `client/`.
 2. Each layer SHALL have clear import boundaries (no circular imports between layers).
 3. The adapter layer SHALL have no dependency on the server layer.
-4. The client layer SHALL have no dependency on the server, auth, or store layers.
+4. The client layer SHALL have no dependency on the server, auth, or storage layers.
 
 ---
 
@@ -2456,7 +2456,7 @@ apcore-a2a is the second adapter in the planned family. It depends on the `apcor
 
 **Preconditions:**
 1. apcore-a2a server is running with `auth=JWTAuth(issuer="https://idp.corp.com", audience="apcore-agents")`.
-2. Agent Card declares `securitySchemes: [{"type": "http", "scheme": "bearer"}]`.
+2. Agent Card declares `securitySchemes: {"bearerAuth": {"httpAuthSecurityScheme": {"scheme": "bearer", "bearerFormat": "JWT"}}}` (A2A 1.0 proto3 `oneof` shape) and `securityRequirements: []`.
 3. Orchestrator has a valid JWT token from the configured issuer.
 
 **Main Flow:**

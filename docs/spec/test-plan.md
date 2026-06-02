@@ -274,7 +274,7 @@ jobs:
 4. Assert `card.name == "my-agent"`.
 5. Assert `card.description == "Test agent"`.
 6. Assert `card.version == "1.2.3"`.
-7. Assert `card.url == "http://localhost:8000"`.
+7. Assert `card.supportedInterfaces[0].url == "http://localhost:8000"` (A2A 1.0 removed the top-level `card.url`).
 8. Assert `len(card.skills) == 2`.
 9. Assert `"application/json"` in `card.defaultInputModes`.
 10. Assert `"application/json"` in `card.defaultOutputModes`.
@@ -296,7 +296,7 @@ jobs:
 **Test Steps:**
 1. Create `StubRegistry` with no project config and 3 modules.
 2. Call `AgentCardBuilder(registry, url="http://localhost:9000").build()`.
-3. Assert `card.name == "apcore-agent"`.
+3. Assert `card.name == "Apcore Agent"`.
 4. Assert `card.version == "0.0.0"`.
 5. Assert `"3" in card.description` (auto-generated includes module count).
 
@@ -1976,7 +1976,10 @@ schema = {
 
 ---
 
-#### TC-OPS-002: Metrics endpoint returns Prometheus format
+#### TC-OPS-002: Metrics endpoint returns JSON counters
+
+> **Scope:** `/metrics` is implemented in the Python and TypeScript SDKs only; the
+> Rust crate does not serve `/metrics`. This test applies to Python/TypeScript.
 
 | Field | Value |
 |-------|-------|
@@ -1987,10 +1990,10 @@ schema = {
 **Test Steps:**
 1. GET `/metrics`.
 2. Assert HTTP 200.
-3. Assert `Content-Type: text/plain`.
-4. Assert body contains `apcore_a2a_tasks_total`.
+3. Assert `Content-Type: application/json`.
+4. Assert the JSON body contains the keys `active_tasks`, `completed_tasks`, `failed_tasks`, `canceled_tasks`, `input_required_tasks`, `total_requests`, `uptime_seconds`.
 
-**Expected Result:** Prometheus text format with `apcore_a2a_tasks_total` metric.
+**Expected Result:** A JSON object of counters, e.g. `{"active_tasks": 0, "completed_tasks": N, "failed_tasks": 0, ...}`.
 
 ---
 
@@ -2585,8 +2588,8 @@ TASKS_CANCEL_REQUEST = lambda task_id: {
     {"url": "http://localhost:8000", "protocolBinding": "JSONRPC", "protocolVersion": "1.0", "tenant": ""}
   ],
   "provider": null,
-  "defaultInputModes": ["application/json", "text/plain"],
-  "defaultOutputModes": ["application/json"],
+  "defaultInputModes": ["text/plain", "application/json"],
+  "defaultOutputModes": ["text/plain", "application/json"],
   "capabilities": {
     "streaming": true,
     "pushNotifications": false,

@@ -78,6 +78,10 @@ livenessProbe:
 
 ## Sub-feature 2: Metrics Endpoint
 
+> **SDK availability:** `/metrics` is implemented in the **Python and TypeScript SDKs only**.
+> The Rust crate does not serve a `/metrics` endpoint (its `metrics` config flag is inert);
+> SSE streaming and push notifications are fully supported in Rust.
+
 **Implemented in**: `_build_metrics_handler()` (`server/factory.py`)
 
 **Route**: `GET /metrics`
