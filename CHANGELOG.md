@@ -5,17 +5,6 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [0.4.1] - 2026-06-03
-
-### Added
-
-- **Cross-language conformance fixtures** (`conformance/`) — shared golden cases for agent card shape, error mapping, JWT claim coercion, part conversion, skill resolution, and streaming events, consumed by the Python/Rust/TypeScript conformance suites to lock A2A 1.0 behavior across languages.
-- `LICENSE` (Apache-2.0) and `.gitignore`.
-
-### Changed
-
-- Spec docs (PRD/SRS/tech-design/test-plan) aligned with the A2A 1.0 conformance cases.
-
 ## [0.4.0] - 2026-06-01
 
 ### Changed
@@ -36,6 +25,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Error Formatter Registry** (§8.8) — all SDKs register their `ErrorMapper` with `ErrorFormatterRegistry.register("a2a", ...)` so the ecosystem has a discoverable A2A error formatter.
 - **Config Bus namespace** (§9.13) — all SDKs register the `apcore-a2a` namespace with env prefix `APCORE_A2A` and defaults for `execution_timeout`, `cors_origins`, `explorer`, `metrics`, `push_notifications`.
 - **New error codes** — `MODULE_DISABLED`, `CONFIG_NAMESPACE_DUPLICATE`, `CONFIG_MOUNT_ERROR`, `CONFIG_BIND_ERROR` handled in ErrorMapper across all languages.
+- **Cross-language conformance fixtures** (`conformance/`) — shared golden cases for agent card shape, error mapping, JWT claim coercion, part conversion, skill resolution, and streaming events, consumed by the Python/Rust/TypeScript conformance suites to lock A2A 1.0 behavior across languages.
+- **`LICENSE`** (Apache-2.0) and a repo `.gitignore`.
 
 ### Fixed (Cross-Language Sync)
 
