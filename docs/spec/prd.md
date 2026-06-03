@@ -690,13 +690,13 @@ serve(registry)
 | `ModuleNotFoundError` | -32601 (Method not found) | Module ID included in message |
 | `SchemaValidationError` | -32602 (Invalid params) | Field-level validation details in `message` |
 | `ACLDeniedError` | -32001 (TaskNotFound) | Details hidden per security policy |
-| `ModuleExecuteError` | -32603 (Internal error) | Sanitized message; no stack trace |
+| `ModuleExecuteError` | -32603 (Internal error) | Fixed `"Internal server error"` message; original text never surfaced |
 | `ModuleTimeoutError` | -32603 (Internal error) | "Execution timeout" message |
 | `ApprovalPendingError` | *Not an error* | Task transitions to `input_required` |
 | `InvalidInputError` | -32602 (Invalid params) | Input error details in `message` |
 | `CallDepthExceededError` | -32603 (Internal error) | "Safety limit exceeded" message |
 | `CircularCallError` | -32603 (Internal error) | "Safety limit exceeded" message |
-| Unknown exceptions | -32603 (Internal error) | Generic "Internal error" message |
+| Unknown exceptions | -32603 (Internal error) | Generic "Internal server error" message |
 
 **User Story:** US-003
 
@@ -704,7 +704,7 @@ serve(registry)
 1. Each apcore error type listed above produces a distinct, identifiable JSON-RPC error response.
 2. `SchemaValidationError` responses include field-level error details (field name, error code, message) summarized in the `message` field. (Per the v0.4 decision, JSON-RPC errors are `{code, message}` only -- no `data` field.)
 3. `ACLDeniedError` responses do not leak sensitive security information (no caller_id, target_id, or ACL rule details).
-4. Unexpected exceptions produce a generic "Internal error" message without leaking stack traces, file paths, or internal configuration.
+4. Unexpected exceptions produce a generic "Internal server error" message without leaking stack traces, file paths, or internal configuration.
 5. JSON-RPC error objects contain only `code` and `message` (no `data` field); any error type identifier or details are conveyed within `message`.
 6. Error messages never contain internal file paths, stack traces, or sensitive configuration values.
 7. `ApprovalPendingError` is handled as a task state transition to `input_required`, not as a JSON-RPC error.

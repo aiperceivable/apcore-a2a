@@ -894,7 +894,7 @@ schema = {
 
 ---
 
-#### TC-ERR-004: ModuleExecuteError maps to -32603 with sanitized message
+#### TC-ERR-004: ModuleExecuteError maps to -32603 with fixed generic message
 
 | Field | Value |
 |-------|-------|
@@ -905,9 +905,10 @@ schema = {
 **Test Steps:**
 1. Call `ErrorMapper.to_jsonrpc_error(ModuleExecuteError("Database connection failed at 192.168.1.1"))`.
 2. Assert `result.code == -32603`.
-3. Assert `"192.168.1.1"` NOT in `result.message`.
+3. Assert `result.message == "Internal server error"` (fixed generic message; the original text is never surfaced).
+4. Assert `"192.168.1.1"` NOT in `result.message`.
 
-**Expected Result:** Code -32603, internal IP not leaked.
+**Expected Result:** Code -32603, message `"Internal server error"`, internal IP not leaked.
 
 ---
 
@@ -2105,9 +2106,9 @@ schema = {
 **Test Steps:**
 1. POST `message/send` for `fail.module`.
 2. Assert `result.status.state == "TASK_STATE_FAILED"`.
-3. Assert `result.status.message` is non-empty but does NOT contain "internal failure" (sanitized).
+3. Assert `result.status.message` carries the fixed `"Internal server error"` text and does NOT contain "internal failure" (original error text never surfaced).
 
-**Expected Result:** Failed task with sanitized error message.
+**Expected Result:** Failed task with the fixed `"Internal server error"` message (original error text never surfaced).
 
 ---
 
@@ -2456,6 +2457,28 @@ schema = {
 ---
 
 ## 13. Test Data and Fixtures
+
+### 13.0 Cross-Language Conformance Suite
+
+In addition to the per-SDK unit tests below, the repository ships a
+language-agnostic conformance suite at `conformance/` (see
+`conformance/README.md`, **Algorithm A01**). Its `fixtures/*.json` files pin the
+exact observable behaviors that Python, TypeScript, and Rust must all agree on,
+so the same input yields the same A2A 1.0 wire output in every SDK. The per-SDK
+test cases in this plan verify each implementation in isolation; the conformance
+fixtures verify they stay identical to each other.
+
+| Fixture | Locks | Related test cases |
+|---|---|---|
+| `jwt_claim_coercion.json` (A-AUTH) | JWT claim → `Identity` coercion (Rust-strict) | TC-AUT-001–004 |
+| `agent_card.json` (A-CARD) | Agent Card shapes incl. `securitySchemes` oneof, `securityRequirements: []` | TC-AGC-001–004, TC-SKL-009/010 |
+| `error_mapping.json` (A-ERR) | exception → JSON-RPC code + sanitized message | TC-ERR-001–005, TC-SEC-003/004 |
+| `skill_resolution.json` (A-SKILL) | missing/invalid `skillId` & unparseable parts → FAILED task | TC-INT-005, TC-PRT-005/006 |
+| `streaming_events.json` (A-STREAM) | SSE sequence incl. terminal `lastChunk` marker, no `final` flag | TC-STR-002/003/004, TC-INT-002 |
+| `part_conversion.json` (A-PART) | `Part` ⇄ module input/output conversion | TC-PRT-001–006 |
+
+Each SDK runs these fixtures through its own public API (in-process, not a
+subprocess) and reports failures by fixture file + case `id`.
 
 ### 13.1 Stub Module Descriptors
 

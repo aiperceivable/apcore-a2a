@@ -915,13 +915,13 @@ apcore-a2a is the second adapter in the planned family. It depends on the `apcor
 | **Priority** | P0 |
 | **PRD Trace** | FR-007 |
 
-**Description:** The system SHALL map apcore `ModuleExecuteError` to JSON-RPC error code -32603 (Internal error) with sanitized message.
+**Description:** The system SHALL map apcore `ModuleExecuteError` to JSON-RPC error code -32603 with the fixed generic message `"Internal server error"`.
 
 **Rationale:** Internal execution errors must not expose stack traces, file paths, or internal configuration to external clients.
 
 **Acceptance Criteria:**
-1. `ModuleExecuteError` SHALL produce JSON-RPC error with code -32603.
-2. The error message SHALL be sanitized: no stack traces, file paths, or internal configuration values.
+1. `ModuleExecuteError` SHALL produce a JSON-RPC error with code -32603. There is no dedicated `MODULE_EXECUTE_ERROR` branch in the `ErrorMapper`; it is handled by the generic/default arm.
+2. The error message SHALL be the fixed string `"Internal server error"`; the original error text is never surfaced, so stack traces, file paths, and internal configuration cannot leak.
 3. The JSON-RPC error object is `{code, message}` only; no `data` field is emitted in v0.4.
 
 ---
@@ -998,7 +998,7 @@ apcore-a2a is the second adapter in the planned family. It depends on the `apcor
 
 **Acceptance Criteria:**
 1. Any exception not matched by FR-ERR-001 through FR-ERR-007 SHALL produce JSON-RPC error -32603.
-2. The error message SHALL be "Internal error".
+2. The error message SHALL be "Internal server error" (the same fixed generic message used for `ModuleExecuteError` per FR-ERR-004, so unrecognized and execution errors are indistinguishable to the caller).
 3. The error SHALL NOT include stack traces, file paths, or internal variable values.
 4. The JSON-RPC error object is `{code, message}` only; no `data` field is emitted in v0.4.
 5. The actual exception SHALL be logged at ERROR level with full stack trace for server-side debugging.
@@ -2223,7 +2223,7 @@ apcore-a2a is the second adapter in the planned family. It depends on the `apcor
 **Exception Flows:**
 
 *E1: Module execution error*
-- At step 9, if the module raises `ModuleExecuteError`, server transitions Task to `failed` state with sanitized error message and returns the failed Task in the response.
+- At step 9, if the module raises `ModuleExecuteError`, server transitions Task to `failed` state with the fixed `"Internal server error"` message (original text never surfaced) and returns the failed Task in the response.
 
 *E2: Execution timeout*
 - At step 9, if execution exceeds the timeout (default: 300s), server transitions Task to `failed` with message "Execution timed out" and returns the failed Task.
@@ -2279,7 +2279,7 @@ apcore-a2a is the second adapter in the planned family. It depends on the `apcor
 **Exception Flows:**
 
 *E1: Module error during streaming*
-- At step 7, if the module raises an exception mid-stream, server transitions Task to `failed` and emits a final `TaskStatusUpdateEvent` with `state: "failed"` and the sanitized error message.
+- At step 7, if the module raises an exception mid-stream, server transitions Task to `failed` and emits a final `TaskStatusUpdateEvent` with `state: "failed"` and the fixed per-error-class message (`"Internal server error"` for a generic execution error; `"Execution timed out"` on timeout) — the original error text is never surfaced.
 
 **Postconditions:**
 1. Task is in terminal state (completed, failed, or canceled).
@@ -2677,15 +2677,15 @@ Message  1 --- * Part             (one Message contains many Parts)
 |---------------|-------|------------|-------|--------|
 | submitted | execution_start | working | -- | Invoke Executor |
 | submitted | cancel_request | canceled | -- | Set status.message = "Canceled by client" |
-| submitted | internal_error | failed | -- | Set status.message with sanitized error |
+| submitted | internal_error | failed | -- | Set status.message = "Internal server error" |
 | working | execution_success | completed | Output is not None | Create Artifact from output |
-| working | execution_error | failed | -- | Set status.message with sanitized error |
+| working | execution_error | failed | -- | Set status.message = "Internal server error" |
 | working | cancel_request | canceled | CancelToken active | Trigger CancelToken.cancel() |
 | working | approval_pending | input_required | Module raises ApprovalPendingError | Set status.message describing needed input |
 | working | timeout | failed | Execution exceeds timeout | Set status.message = "Execution timed out" |
 | input_required | resume_message | working | Follow-up message in same context | Provide new input to module |
 | input_required | cancel_request | canceled | -- | Set status.message = "Canceled by client" |
-| input_required | internal_error | failed | -- | Set status.message with sanitized error |
+| input_required | internal_error | failed | -- | Set status.message = "Internal server error" |
 
 **Boundary Conditions:**
 - Maximum tasks in store: 10,000 (configurable via `InMemoryTaskStore(max_capacity=N)`).

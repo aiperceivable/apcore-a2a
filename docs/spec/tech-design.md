@@ -2338,7 +2338,7 @@ All JSON-RPC errors follow this structure:
   "id": "req-001",
   "error": {
     "code": -32603,
-    "message": "Internal error"
+    "message": "Internal server error"
   }
 }
 ```
@@ -2452,7 +2452,7 @@ currently always `[]` in all SDKs.
 | ACL denied | Masked as "Task not found" (-32001); actual denial logged WARNING |
 | Module execution error | Sanitized message; no stack traces, paths, or config |
 | Safety limit errors | Generic "Safety limit exceeded" message |
-| Unknown exceptions | Generic "Internal error" message |
+| Unknown exceptions | Generic "Internal server error" message |
 | Invalid tokens | No token content in error; only "Missing or invalid Bearer token" |
 | Webhook SSRF | Production: HTTPS-only; reject loopback and private IP ranges |
 
