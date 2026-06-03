@@ -14,107 +14,154 @@
 
 Command-line interface for launching an A2A agent server without writing Python code. Discovers modules from an extensions directory, configures auth/push/explorer from flags, then calls `serve()`. Entry point registered as `apcore-a2a` in `pyproject.toml`.
 
-## File: `__main__.py`
+## File: `__main__.py` (Python) / `cli.ts` (TypeScript) / `cli.rs` (Rust)
 
-```python
-def main() -> None:
-    parser = argparse.ArgumentParser(
-        prog="apcore-a2a",
-        description="Launch an A2A agent server from apcore modules",
-    )
-    parser.add_argument(
-        "--version", action="version",
-        version=f"%(prog)s {__version__}",
-    )
+The Python CLI exposes a `serve` subcommand with a rich flag set; the TypeScript
+CLI mirrors it (`npx apcore-a2a serve ...`); the Rust CLI is a thin clap `Cli`
+struct with no `serve` subcommand and only a minimal set of flags (auth,
+explorer, metrics, and similar options are configured via code/env instead).
 
-    subparsers = parser.add_subparsers(dest="command")
+=== "Python"
 
-    # --- serve subcommand ---
-    serve_parser = subparsers.add_parser("serve", help="Start A2A server")
-    serve_parser.add_argument(
-        "--extensions-dir", required=True,
-        help="Path to directory containing apcore module extensions",
-    )
-    serve_parser.add_argument(
-        "--host", default="127.0.0.1",
-        help="Bind host (default: 127.0.0.1)",
-    )
-    serve_parser.add_argument(
-        "--port", type=int, default=8000,
-        help="Bind port (default: 8000)",
-    )
-    serve_parser.add_argument(
-        "--name", default=None,
-        help="Agent display name (default: from registry config)",
-    )
-    serve_parser.add_argument(
-        "--description", default=None,
-        help="Agent description",
-    )
-    serve_parser.add_argument(
-        "--version-str", default=None, dest="agent_version",
-        help="Agent version string (default: from registry config)",
-    )
-    serve_parser.add_argument(
-        "--url", default=None,
-        help="Public base URL for Agent Card (default: http://{host}:{port})",
-    )
-    serve_parser.add_argument(
-        "--auth-type", choices=["bearer"], default=None,
-        help="Authentication type",
-    )
-    serve_parser.add_argument(
-        "--auth-key", default=None,
-        help="JWT verification key or path to key file",
-    )
-    serve_parser.add_argument(
-        "--auth-issuer", default=None,
-        help="Expected JWT issuer (iss claim)",
-    )
-    serve_parser.add_argument(
-        "--auth-audience", default=None,
-        help="Expected JWT audience (aud claim)",
-    )
-    serve_parser.add_argument(
-        "--push-notifications", action="store_true",
-        help="Enable push notification support",
-    )
-    serve_parser.add_argument(
-        "--explorer", action="store_true",
-        help="Enable Explorer UI",
-    )
-    serve_parser.add_argument(
-        "--cors-origins", nargs="*", default=None,
-        help="Allowed CORS origins (space-separated)",
-    )
-    serve_parser.add_argument(
-        "--execution-timeout", type=int, default=300,
-        help="Task execution timeout in seconds (default: 300)",
-    )
-    serve_parser.add_argument(
-        "--log-level",
-        choices=["debug", "info", "warning", "error"],
-        default="info",
-        help="Logging level (default: info)",
-    )
+    ```python
+    def main() -> None:
+        parser = argparse.ArgumentParser(
+            prog="apcore-a2a",
+            description="Launch an A2A agent server from apcore modules",
+        )
+        parser.add_argument(
+            "--version", action="version",
+            version=f"%(prog)s {__version__}",
+        )
 
-    args = parser.parse_args()
+        subparsers = parser.add_subparsers(dest="command")
 
-    if args.command == "serve":
-        _run_serve(args)
-    else:
-        parser.print_help()
-        sys.exit(1)
+        # --- serve subcommand ---
+        serve_parser = subparsers.add_parser("serve", help="Start A2A server")
+        serve_parser.add_argument(
+            "--extensions-dir", required=True,
+            help="Path to directory containing apcore module extensions",
+        )
+        serve_parser.add_argument(
+            "--host", default="127.0.0.1",
+            help="Bind host (default: 127.0.0.1)",
+        )
+        serve_parser.add_argument(
+            "--port", type=int, default=8000,
+            help="Bind port (default: 8000)",
+        )
+        serve_parser.add_argument(
+            "--name", default=None,
+            help="Agent display name (default: from registry config)",
+        )
+        serve_parser.add_argument(
+            "--description", default=None,
+            help="Agent description",
+        )
+        serve_parser.add_argument(
+            "--version-str", default=None, dest="agent_version",
+            help="Agent version string (default: from registry config)",
+        )
+        serve_parser.add_argument(
+            "--url", default=None,
+            help="Public base URL for Agent Card (default: http://{host}:{port})",
+        )
+        serve_parser.add_argument(
+            "--auth-type", choices=["bearer"], default=None,
+            help="Authentication type",
+        )
+        serve_parser.add_argument(
+            "--auth-key", default=None,
+            help="JWT verification key or path to key file",
+        )
+        serve_parser.add_argument(
+            "--auth-issuer", default=None,
+            help="Expected JWT issuer (iss claim)",
+        )
+        serve_parser.add_argument(
+            "--auth-audience", default=None,
+            help="Expected JWT audience (aud claim)",
+        )
+        serve_parser.add_argument(
+            "--push-notifications", action="store_true",
+            help="Enable push notification support",
+        )
+        serve_parser.add_argument(
+            "--explorer", action="store_true",
+            help="Enable Explorer UI",
+        )
+        serve_parser.add_argument(
+            "--cors-origins", nargs="*", default=None,
+            help="Allowed CORS origins (space-separated)",
+        )
+        serve_parser.add_argument(
+            "--execution-timeout", type=int, default=300,
+            help="Task execution timeout in seconds (default: 300)",
+        )
+        serve_parser.add_argument(
+            "--log-level",
+            choices=["debug", "info", "warning", "error"],
+            default="info",
+            help="Logging level (default: info)",
+        )
+
+        args = parser.parse_args()
+
+        if args.command == "serve":
+            _run_serve(args)
+        else:
+            parser.print_help()
+            sys.exit(1)
 
 
-def _run_serve(args: argparse.Namespace) -> None:
-    """Validate args, build Registry, configure auth, call serve()."""
-    ...
+    def _run_serve(args: argparse.Namespace) -> None:
+        """Validate args, build Registry, configure auth, call serve()."""
+        ...
 
 
-if __name__ == "__main__":
-    main()
-```
+    if __name__ == "__main__":
+        main()
+    ```
+
+=== "TypeScript"
+
+    The TypeScript CLI (`src/cli.ts`, bin `apcore-a2a`) registers a `serve`
+    subcommand whose flags mirror the Python set: `--extensions-dir` (required),
+    `--host` (127.0.0.1), `--port` (8000), `--name`, `--description`,
+    `--version-str`, `--url`, `--auth-type bearer`, `--auth-key`,
+    `--auth-issuer`, `--auth-audience`, `--push-notifications`, `--explorer`,
+    `--cors-origins`, `--execution-timeout` (300), `--log-level` (info), and
+    `--metrics`. It exports `main()` and `resolveAuthKey()`.
+
+    ```typescript
+    // src/cli.ts — entry point, invoked as `npx apcore-a2a serve ...`
+    export async function main(): Promise<void> {
+      // parse flags (commander), build the registry from --extensions-dir,
+      // resolve auth via resolveAuthKey(), then call serve(registry, opts).
+    }
+    ```
+
+=== "Rust"
+
+    The Rust CLI is a clap `Cli` struct with no `serve` subcommand. Only
+    `-e/--extensions-dir`, `-n/--name`, `--url`, and `-p/--port` are exposed.
+    Auth, explorer, metrics, CORS, push notifications, execution timeout, and
+    log level are not CLI flags — configure them via code/env instead.
+
+    ```rust
+    #[derive(Parser)]
+    #[command(name = "apcore-a2a", version, about = "A2A protocol adapter for apcore")]
+    pub struct Cli {
+        #[arg(short, long, default_value = "./extensions")] pub extensions_dir: String,
+        #[arg(short, long, default_value = "apcore-a2a")] pub name: String,
+        #[arg(long, default_value = "http://localhost:8000")] pub url: String,
+        #[arg(short, long, default_value_t = 8000)] pub port: u16,
+    }
+
+    pub fn run() -> Result<(), Box<dyn std::error::Error>> {
+        // parse Cli, build the backend from extensions_dir, then call serve(..).
+    }
+    ```
 
 ---
 
@@ -202,23 +249,45 @@ except Exception as e:
 
 ## `_resolve_auth_key()` — Key Resolution
 
-```python
-def _resolve_auth_key(auth_key: str | None) -> str | None:
-    """Resolve auth key: file path > direct value > APCORE_JWT_SECRET env var.
+=== "Python"
 
-    Priority order:
-    1. If auth_key is a path to an existing file → read file contents.
-    2. If auth_key is provided and not a file path → use as literal key.
-    3. If auth_key is None → check os.environ.get("APCORE_JWT_SECRET").
-    4. Return None if all sources empty.
-    """
-    if auth_key:
-        p = Path(auth_key)
-        if p.exists():
-            return p.read_text().strip()
-        return auth_key
-    return os.environ.get("APCORE_JWT_SECRET")
-```
+    ```python
+    def _resolve_auth_key(auth_key: str | None) -> str | None:
+        """Resolve auth key: file path > direct value > APCORE_JWT_SECRET env var.
+
+        Priority order:
+        1. If auth_key is a path to an existing file → read file contents.
+        2. If auth_key is provided and not a file path → use as literal key.
+        3. If auth_key is None → check os.environ.get("APCORE_JWT_SECRET").
+        4. Return None if all sources empty.
+        """
+        if auth_key:
+            p = Path(auth_key)
+            if p.exists():
+                return p.read_text().strip()
+            return auth_key
+        return os.environ.get("APCORE_JWT_SECRET")
+    ```
+
+=== "TypeScript"
+
+    The TypeScript CLI exports `resolveAuthKey(authKey?)` with the same priority
+    order: an existing file path is read; otherwise the value is used literally;
+    otherwise it falls back to the `APCORE_JWT_SECRET` env var.
+
+    ```typescript
+    // src/cli.ts
+    export function resolveAuthKey(authKey?: string): string | undefined {
+      // file path → read; else literal; else process.env.APCORE_JWT_SECRET
+    }
+    ```
+
+=== "Rust"
+
+    > Not applicable — the Rust CLI exposes no auth flags, so there is no
+    > `resolve_auth_key` helper. Configure JWT auth in code via
+    > `JWTAuthenticator::new(std::env::var("APCORE_JWT_SECRET")?)` and the
+    > `*_with_auth` entry points instead.
 
 ---
 
@@ -234,57 +303,163 @@ def _resolve_auth_key(auth_key: str | None) -> str | None:
 
 ## CLI Invocation Examples
 
-```bash
-# Minimal
-apcore-a2a serve --extensions-dir ./extensions
+=== "Python"
 
-# With auth
-apcore-a2a serve --extensions-dir ./ext --auth-type bearer --auth-key $APCORE_JWT_SECRET
+    ```bash
+    # Minimal
+    apcore-a2a serve --extensions-dir ./extensions
 
-# With auth key file
-apcore-a2a serve --extensions-dir ./ext --auth-type bearer --auth-key /run/secrets/jwt.key
+    # With auth
+    apcore-a2a serve --extensions-dir ./ext --auth-type bearer --auth-key $APCORE_JWT_SECRET
 
-# Full configuration
-apcore-a2a serve \
-  --extensions-dir ./extensions \
-  --host 0.0.0.0 \
-  --port 8080 \
-  --name "My Agent" \
-  --description "Agent for image processing" \
-  --auth-type bearer \
-  --auth-key $APCORE_JWT_SECRET \
-  --auth-issuer https://auth.example.com \
-  --push-notifications \
-  --explorer \
-  --cors-origins "https://app.example.com" \
-  --log-level info
+    # With auth key file
+    apcore-a2a serve --extensions-dir ./ext --auth-type bearer --auth-key /run/secrets/jwt.key
 
-# Show version
-apcore-a2a --version
-```
+    # Full configuration
+    apcore-a2a serve \
+      --extensions-dir ./extensions \
+      --host 0.0.0.0 \
+      --port 8080 \
+      --name "My Agent" \
+      --description "Agent for image processing" \
+      --auth-type bearer \
+      --auth-key $APCORE_JWT_SECRET \
+      --auth-issuer https://auth.example.com \
+      --push-notifications \
+      --explorer \
+      --cors-origins "https://app.example.com" \
+      --log-level info
+
+    # Show version
+    apcore-a2a --version
+    ```
+
+=== "TypeScript"
+
+    ```bash
+    # Minimal
+    npx apcore-a2a serve --extensions-dir ./extensions
+
+    # With auth
+    npx apcore-a2a serve --extensions-dir ./ext --auth-type bearer --auth-key $APCORE_JWT_SECRET
+
+    # With auth key file
+    npx apcore-a2a serve --extensions-dir ./ext --auth-type bearer --auth-key /run/secrets/jwt.key
+
+    # Full configuration
+    npx apcore-a2a serve \
+      --extensions-dir ./extensions \
+      --host 0.0.0.0 \
+      --port 8080 \
+      --name "My Agent" \
+      --description "Agent for image processing" \
+      --auth-type bearer \
+      --auth-key $APCORE_JWT_SECRET \
+      --auth-issuer https://auth.example.com \
+      --push-notifications \
+      --explorer \
+      --cors-origins "https://app.example.com" \
+      --metrics \
+      --log-level info
+    ```
+
+=== "Rust"
+
+    The Rust binary has no `serve` subcommand and exposes only
+    `-e/--extensions-dir`, `-n/--name`, `--url`, and `-p/--port`. Auth, explorer,
+    push notifications, CORS, and metrics are not CLI flags (configure them via
+    code/env instead).
+
+    ```bash
+    # Minimal
+    apcore-a2a --extensions-dir ./extensions
+
+    # Name + port (port is folded into the bind address; --url sets the card URL)
+    apcore-a2a \
+      --extensions-dir ./extensions \
+      --name "My Agent" \
+      --url http://localhost:8080 \
+      --port 8080
+
+    # Show version (clap-generated)
+    apcore-a2a --version
+    ```
 
 ---
 
-## Entry Point Registration (`pyproject.toml`)
+## Entry Point Registration
 
-```toml
-[project.scripts]
-apcore-a2a = "apcore_a2a.__main__:main"
-```
+Each SDK registers the `apcore-a2a` binary through its own packaging manifest.
 
-Also invocable as a module:
-```bash
-python -m apcore_a2a serve --extensions-dir ./ext
-```
+=== "Python"
+
+    ```toml
+    # pyproject.toml
+    [project.scripts]
+    apcore-a2a = "apcore_a2a.__main__:main"
+    ```
+
+    Also invocable as a module:
+
+    ```bash
+    python -m apcore_a2a serve --extensions-dir ./ext
+    ```
+
+=== "TypeScript"
+
+    ```json
+    // package.json
+    {
+      "bin": { "apcore-a2a": "dist/cli.js" }
+    }
+    ```
+
+    Invocable via the package runner:
+
+    ```bash
+    npx apcore-a2a serve --extensions-dir ./ext
+    ```
+
+=== "Rust"
+
+    ```toml
+    # Cargo.toml
+    [[bin]]
+    name = "apcore-a2a"
+    path = "src/bin/apcore-a2a.rs"
+    ```
+
+    Build/run the binary with Cargo:
+
+    ```bash
+    cargo run --bin apcore-a2a -- --extensions-dir ./ext
+    ```
 
 ---
 
 ## File Structure
 
-```
-src/apcore_a2a/
-    __main__.py    # main(), _run_serve(), _resolve_auth_key()
-```
+=== "Python"
+
+    ```
+    src/apcore_a2a/
+        __main__.py    # main(), _run_serve(), _resolve_auth_key()
+    ```
+
+=== "TypeScript"
+
+    ```
+    src/
+        cli.ts         # main(), resolveAuthKey()
+    ```
+
+=== "Rust"
+
+    ```
+    src/
+        cli.rs              # Cli (clap Parser), run()
+        bin/apcore-a2a.rs   # binary entry point
+    ```
 
 ## Key Invariants
 

@@ -274,27 +274,66 @@ C4Component
 
 #### 4.2.1 `serve()` Function
 
-```python
-def serve(
-    registry_or_executor: object,
-    *,
-    host: str = "0.0.0.0",
-    port: int = 8000,
-    name: str | None = None,
-    description: str | None = None,
-    version: str | None = None,
-    auth: Authenticator | None = None,
-    task_store: TaskStore | None = None,
-    cors_origins: list[str] | None = None,
-    push_notifications: bool = False,
-    explorer: bool = False,
-    explorer_prefix: str = "/explorer",
-    cancel_on_disconnect: bool = True,
-    shutdown_timeout: int = 30,
-    execution_timeout: int = 300,
-    log_level: str | None = None,
-) -> None:
-```
+=== "Python"
+
+    ```python
+    def serve(
+        registry_or_executor: object,
+        *,
+        host: str = "0.0.0.0",
+        port: int = 8000,
+        name: str | None = None,
+        description: str | None = None,
+        version: str | None = None,
+        auth: Authenticator | None = None,
+        task_store: TaskStore | None = None,
+        cors_origins: list[str] | None = None,
+        push_notifications: bool = False,
+        explorer: bool = False,
+        explorer_prefix: str = "/explorer",
+        cancel_on_disconnect: bool = True,
+        shutdown_timeout: int = 30,
+        execution_timeout: int = 300,
+        log_level: str | None = None,
+    ) -> None:
+    ```
+
+=== "TypeScript"
+
+    ```typescript
+    // serve() takes a single options object; host/port live in ServeOptions.
+    export function serve(registryOrExecutor: unknown, opts?: ServeOptions): void
+
+    export interface ServeOptions extends AsyncServeOptions {
+      host?: string; port?: number; logLevel?: string; shutdownTimeout?: number;
+    }
+    export interface AsyncServeOptions {
+      name?: string; description?: string; version?: string; url?: string;
+      auth?: Authenticator; taskStore?: TaskStore; corsOrigins?: string[];
+      pushNotifications?: boolean; explorer?: boolean; explorerPrefix?: string;
+      executionTimeout?: number; metrics?: boolean; sysModules?: boolean;
+    }
+    ```
+
+=== "Rust"
+
+    ```rust
+    // Rust folds host+port into config.url (no host/port fields); auth is passed
+    // via the *_with_auth entry points, not a config field.
+    pub async fn serve(source: BackendSource, config: APCoreA2AConfig) -> Result<(), APCoreA2AError>
+
+    pub struct APCoreA2AConfig {
+        pub name: String,            // "apcore-a2a"
+        pub description: String,     // "apcore A2A agent"
+        pub version: String,         // VERSION
+        pub url: String,             // "http://localhost:8000" (bind addr derived from this)
+        pub execution_timeout: u64,  // 300
+        pub explorer: bool,          // false
+        pub metrics: bool,           // false (INERT in Rust)
+        pub sys_modules: bool,       // false
+        pub cors_origins: Vec<String>, // []
+    }
+    ```
 
 **Behavior:**
 
@@ -312,32 +351,63 @@ def serve(
 
 #### 4.2.2 `async_serve()` Function
 
-```python
-async def async_serve(
-    registry_or_executor: object,
-    *,
-    # Same kwargs as serve() except host and port
-    name: str | None = None,
-    description: str | None = None,
-    version: str | None = None,
-    auth: Authenticator | None = None,
-    task_store: TaskStore | None = None,
-    cors_origins: list[str] | None = None,
-    push_notifications: bool = False,
-    explorer: bool = False,
-    explorer_prefix: str = "/explorer",
-    cancel_on_disconnect: bool = True,
-    execution_timeout: int = 300,
-) -> Starlette:
-```
+=== "Python"
+
+    ```python
+    async def async_serve(
+        registry_or_executor: object,
+        *,
+        # Same kwargs as serve() except host and port
+        name: str | None = None,
+        description: str | None = None,
+        version: str | None = None,
+        auth: Authenticator | None = None,
+        task_store: TaskStore | None = None,
+        cors_origins: list[str] | None = None,
+        push_notifications: bool = False,
+        explorer: bool = False,
+        explorer_prefix: str = "/explorer",
+        cancel_on_disconnect: bool = True,
+        execution_timeout: int = 300,
+    ) -> Starlette:
+    ```
+
+=== "TypeScript"
+
+    ```typescript
+    // Returns a Promise<Express> (an Express app) — not a Starlette app.
+    export async function asyncServe(registryOrExecutor: unknown, opts?: AsyncServeOptions): Promise<Express>
+    ```
+
+=== "Rust"
+
+    ```rust
+    // async_serve runs the server; build_app returns the axum Router for embedding.
+    pub async fn async_serve(source: BackendSource, config: APCoreA2AConfig) -> Result<(), APCoreA2AError>
+    pub async fn build_app(source: BackendSource, config: APCoreA2AConfig) -> Result<(Router, AgentCard), APCoreA2AError>
+    ```
 
 Returns a configured Starlette ASGI application without starting uvicorn. Suitable for embedding in existing ASGI servers.
 
 #### 4.2.3 `A2AClient` Re-export
 
-```python
-from apcore_a2a.client import A2AClient
-```
+=== "Python"
+
+    ```python
+    from apcore_a2a.client import A2AClient
+    ```
+
+=== "TypeScript"
+
+    ```typescript
+    import { A2AClient } from "apcore-a2a";
+    ```
+
+=== "Rust"
+
+    ```rust
+    use apcore_a2a::A2AClient;
+    ```
 
 Re-exported at the package level for convenience. The client module has no server-side imports.
 
@@ -349,42 +419,68 @@ Re-exported at the package level for convenience. The client module has no serve
 
 **File**: `adapters/agent_card.py`
 
-```python
-class AgentCardBuilder:
-    def __init__(self, skill_mapper: SkillMapper) -> None:
-        self._skill_mapper = skill_mapper
-        self._cached_card: dict | None = None
-        self._cached_extended_card: dict | None = None
+=== "Python"
 
-    def build(
-        self,
-        registry: object,
-        *,
-        name: str,
-        description: str,
-        version: str,
-        url: str,
-        capabilities: dict[str, bool],
-        security_schemes: dict | None = None,
-    ) -> dict:
-        """Build A2A Agent Card from Registry metadata.
+    ```python
+    class AgentCardBuilder:
+        def __init__(self, skill_mapper: SkillMapper) -> None:
+            self._skill_mapper = skill_mapper
+            self._cached_card: dict | None = None
+            self._cached_extended_card: dict | None = None
 
-        Returns:
-            dict conforming to A2A 1.0 Agent Card JSON Schema.
-        """
+        def build(
+            self,
+            registry: object,
+            *,
+            name: str,
+            description: str,
+            version: str,
+            url: str,
+            capabilities: dict[str, bool],
+            security_schemes: dict | None = None,
+        ) -> dict:
+            """Build A2A Agent Card from Registry metadata.
 
-    def build_extended(
-        self,
-        registry: object,
-        *,
-        base_card: dict,
-        auth_modules: list[str],
-    ) -> dict:
-        """Build extended Agent Card including auth-restricted skills."""
+            Returns:
+                dict conforming to A2A 1.0 Agent Card JSON Schema.
+            """
 
-    def invalidate_cache(self) -> None:
-        """Invalidate cached cards. Called on module registration changes."""
-```
+        def build_extended(
+            self,
+            registry: object,
+            *,
+            base_card: dict,
+            auth_modules: list[str],
+        ) -> dict:
+            """Build extended Agent Card including auth-restricted skills."""
+
+        def invalidate_cache(self) -> None:
+            """Invalidate cached cards. Called on module registration changes."""
+    ```
+
+=== "TypeScript"
+
+    ```typescript
+    class AgentCardBuilder {
+      constructor(skillMapper: SkillMapper)
+      build(registry, { name, description, version, url, capabilities, securitySchemes? }): AgentCard
+      getCachedOrBuild(...): AgentCard
+      buildExtended(baseCard): AgentCard
+      invalidateCache(): void
+    }
+    ```
+
+=== "Rust"
+
+    ```rust
+    impl AgentCardBuilder {
+        pub fn new(skill_mapper: SkillMapper) -> Self
+        pub fn build(&self, registry: &Registry, name: &str, description: &str, version: &str, url: &str, capabilities: AgentCapabilities, security_schemes: Option<Value>) -> AgentCard
+        pub fn build_extended(&self, base_card: &AgentCard) -> AgentCard
+        pub fn get_cached_or_build(&self, registry: &Registry, name: &str, description: &str, version: &str, url: &str, capabilities: AgentCapabilities, security_schemes: Option<Value>) -> AgentCard
+        pub fn invalidate_cache(&self)
+    }
+    ```
 
 **Build logic:**
 
@@ -412,34 +508,58 @@ class AgentCardBuilder:
 
 **File**: `adapters/skill_mapper.py`
 
-```python
-class SkillMapper:
-    def to_skill(self, descriptor: object) -> dict:
-        """Convert ModuleDescriptor to A2A Skill dict.
+=== "Python"
 
-        Mapping:
-            descriptor.module_id     -> Skill.id
-            humanize(module_id)      -> Skill.name
-            descriptor.description   -> Skill.description
-            descriptor.tags          -> Skill.tags
-            descriptor.examples[:10] -> Skill.examples
-            computed                 -> Skill.inputModes, outputModes
-            (annotations are NOT mapped to the Skill — see note below)
-        """
+    ```python
+    class SkillMapper:
+        def to_skill(self, descriptor: object) -> dict:
+            """Convert ModuleDescriptor to A2A Skill dict.
 
-    def _humanize_module_id(self, module_id: str) -> str:
-        """Convert 'image.resize' to 'Image Resize'."""
-        return module_id.replace(".", " ").replace("_", " ").title()
+            Mapping:
+                descriptor.module_id     -> Skill.id
+                humanize(module_id)      -> Skill.name
+                descriptor.description   -> Skill.description
+                descriptor.tags          -> Skill.tags
+                descriptor.examples[:10] -> Skill.examples
+                computed                 -> Skill.inputModes, outputModes
+                (annotations are NOT mapped to the Skill — see note below)
+            """
 
-    def _compute_input_modes(self, descriptor: object) -> list[str]:
-        """Determine inputModes from input_schema."""
+        def _humanize_module_id(self, module_id: str) -> str:
+            """Convert 'image.resize' to 'Image Resize'."""
+            return module_id.replace(".", " ").replace("_", " ").title()
 
-    def _compute_output_modes(self, descriptor: object) -> list[str]:
-        """Determine outputModes from output_schema."""
+        def _compute_input_modes(self, descriptor: object) -> list[str]:
+            """Determine inputModes from input_schema."""
 
-    def _build_examples(self, descriptor: object) -> list[dict]:
-        """Convert apcore examples to A2A Skill examples (max 10)."""
-```
+        def _compute_output_modes(self, descriptor: object) -> list[str]:
+            """Determine outputModes from output_schema."""
+
+        def _build_examples(self, descriptor: object) -> list[dict]:
+            """Convert apcore examples to A2A Skill examples (max 10)."""
+    ```
+
+=== "TypeScript"
+
+    ```typescript
+    class SkillMapper {
+      constructor(schemaConverter?: SchemaConverter)
+      // Convert ModuleDescriptor to an AgentSkill (or null when skipped).
+      toSkill(descriptor: ModuleDescriptor, moduleId?: string): AgentSkill | null
+      // "image.resize" -> "Image Resize"
+      humanizeModuleId(moduleId: string): string
+    }
+    ```
+
+=== "Rust"
+
+    ```rust
+    impl SkillMapper {
+        pub fn new() -> Self
+        // Convert a module descriptor to an AgentSkill.
+        pub fn to_skill(&self, module_id: &str, descriptor: &ModuleDescriptor, description: &str) -> AgentSkill
+    }
+    ```
 
 **Input/output mode logic:**
 
@@ -466,19 +586,44 @@ enrichment, keeping the standard Agent Card free of apcore-specific fields.
 
 Reuses the same approach as apcore-mcp's `SchemaConverter`: deep-copy schemas, inline `$ref`/`$defs`, ensure root `type: object`. Extended for A2A-specific needs:
 
-```python
-class SchemaConverter:
-    def convert_input_schema(self, descriptor: object) -> dict:
-        """Convert apcore input_schema for A2A DataPart usage.
-        Inlines $refs, strips $defs, ensures root type."""
+=== "Python"
 
-    def convert_output_schema(self, descriptor: object) -> dict:
-        """Convert apcore output_schema for A2A Artifact metadata."""
+    ```python
+    class SchemaConverter:
+        def convert_input_schema(self, descriptor: object) -> dict:
+            """Convert apcore input_schema for A2A DataPart usage.
+            Inlines $refs, strips $defs, ensures root type."""
 
-    def detect_root_type(self, schema: dict) -> str:
-        """Return 'string', 'object', or 'unknown' based on schema root type.
-        Used by SkillMapper to determine input/output modes."""
-```
+        def convert_output_schema(self, descriptor: object) -> dict:
+            """Convert apcore output_schema for A2A Artifact metadata."""
+
+        def detect_root_type(self, schema: dict) -> str:
+            """Return 'string', 'object', or 'unknown' based on schema root type.
+            Used by SkillMapper to determine input/output modes."""
+    ```
+
+=== "TypeScript"
+
+    ```typescript
+    class SchemaConverter {
+      convertInputSchema(descriptor): JsonSchema
+      convertOutputSchema(descriptor): JsonSchema
+      // "string" | "object" | "unknown"
+      detectRootType(schema): "string" | "object" | "unknown"
+    }
+    ```
+
+=== "Rust"
+
+    ```rust
+    impl SchemaConverter {
+        pub fn new() -> Self
+        pub fn convert_input_schema(&self, schema: &Value) -> Value
+        pub fn convert_output_schema(&self, schema: &Value) -> Value
+        // "string" | "object" | "unknown"
+        pub fn detect_root_type(&self, schema: Option<&Value>) -> &'static str
+    }
+    ```
 
 #### 4.3.4 `ErrorMapper`
 
@@ -486,39 +631,64 @@ class SchemaConverter:
 
 **File**: `adapters/errors.py`
 
-```python
-class ErrorMapper:
-    # apcore error code -> (JSON-RPC code, message template, sanitize?)
-    _ERROR_MAP: dict[str, tuple[int, str, bool]] = {
-        "MODULE_NOT_FOUND":           (-32601, None, True),   # message = sanitized original
-        "SCHEMA_VALIDATION_ERROR":    (-32602, None, True),   # message = sanitized original
-        "GENERAL_INVALID_INPUT":      (-32602, "Invalid input",                True),
-        "ACL_DENIED":                 (-32001, "Task not found",               True),
-        "MODULE_TIMEOUT":             (-32603, "Execution timeout",            False),
-        "EXECUTION_CANCELLED":        (-32603, "Execution cancelled",          False),
-        "CALL_DEPTH_EXCEEDED":        (-32603, "Safety limit exceeded",        True),
-        "CIRCULAR_CALL":              (-32603, "Safety limit exceeded",        True),
-        "CALL_FREQUENCY_EXCEEDED":    (-32603, "Safety limit exceeded",        True),
-        "CIRCUIT_BREAKER_OPEN":       (-32603, "Service temporarily unavailable", False),
-        "TASK_LIMIT_EXCEEDED":        (-32603, "Service temporarily unavailable", False),
-        "MODULE_DISABLED":            (-32603, "Module is currently disabled", False),
-        "CONFIG_NAMESPACE_DUPLICATE": (-32603, "Configuration error",          False),
-        "CONFIG_MOUNT_ERROR":         (-32603, "Configuration error",          False),
-        "CONFIG_BIND_ERROR":          (-32603, "Configuration error",          False),
-        # Any other code (or a bare Exception) -> (-32603, "Internal server error", False)
+=== "Python"
+
+    ```python
+    class ErrorMapper:
+        # apcore error code -> (JSON-RPC code, message template, sanitize?)
+        _ERROR_MAP: dict[str, tuple[int, str, bool]] = {
+            "MODULE_NOT_FOUND":           (-32601, None, True),   # message = sanitized original
+            "SCHEMA_VALIDATION_ERROR":    (-32602, None, True),   # message = sanitized original
+            "GENERAL_INVALID_INPUT":      (-32602, "Invalid input",                True),
+            "ACL_DENIED":                 (-32001, "Task not found",               True),
+            "MODULE_TIMEOUT":             (-32603, "Execution timeout",            False),
+            "EXECUTION_CANCELLED":        (-32603, "Execution cancelled",          False),
+            "CALL_DEPTH_EXCEEDED":        (-32603, "Safety limit exceeded",        True),
+            "CIRCULAR_CALL":              (-32603, "Safety limit exceeded",        True),
+            "CALL_FREQUENCY_EXCEEDED":    (-32603, "Safety limit exceeded",        True),
+            "CIRCUIT_BREAKER_OPEN":       (-32603, "Service temporarily unavailable", False),
+            "TASK_LIMIT_EXCEEDED":        (-32603, "Service temporarily unavailable", False),
+            "MODULE_DISABLED":            (-32603, "Module is currently disabled", False),
+            "CONFIG_NAMESPACE_DUPLICATE": (-32603, "Configuration error",          False),
+            "CONFIG_MOUNT_ERROR":         (-32603, "Configuration error",          False),
+            "CONFIG_BIND_ERROR":          (-32603, "Configuration error",          False),
+            # Any other code (or a bare Exception) -> (-32603, "Internal server error", False)
+        }
+
+        def to_jsonrpc_error(self, error: Exception) -> dict:
+            """Convert apcore exception to JSON-RPC error response dict.
+
+            Returns:
+                dict with keys: code (int), message (str). Per the v0.4 decision
+                (see Section 9.5), no `data` field is emitted; details go in `message`.
+            """
+
+        def _sanitize_message(self, message: str) -> str:
+            """Remove file paths, stack traces, config values from message."""
+    ```
+
+=== "TypeScript"
+
+    ```typescript
+    // Same error-code mapping; messages are sanitized (strips paths/tracebacks, caps 500 chars).
+    // MODULE_NOT_FOUND->-32601; SCHEMA_VALIDATION_ERROR->-32602; MODULE_TIMEOUT->-32603
+    // ("Execution timeout"); EXECUTION_CANCELLED->-32603; ACL_DENIED->-32001; others->-32603.
+    class ErrorMapper {
+      format(error, context?): Record<string, unknown>
+      toJsonRpcError(error): { code: number; message: string }
     }
+    ```
 
-    def to_jsonrpc_error(self, error: Exception) -> dict:
-        """Convert apcore exception to JSON-RPC error response dict.
+=== "Rust"
 
-        Returns:
-            dict with keys: code (int), message (str). Per the v0.4 decision
-            (see Section 9.5), no `data` field is emitted; details go in `message`.
-        """
-
-    def _sanitize_message(self, message: str) -> str:
-        """Remove file paths, stack traces, config values from message."""
-```
+    ```rust
+    // Same error-code mapping; messages are sanitized (strips paths/tracebacks, truncates 500).
+    // ModuleNotFound->-32601; SchemaValidationError->-32602; ACLDenied->-32001;
+    // ModuleTimeout->-32603 ("Execution timeout"); ExecutionCancelled->-32603; others->-32603.
+    impl ErrorMapper {
+        pub fn to_jsonrpc_error(error: &ModuleError) -> JsonRpcError
+    }
+    ```
 
 **Error mapping table (complete):**
 
@@ -553,40 +723,63 @@ class ErrorMapper:
 
 **File**: `adapters/parts.py`
 
-```python
-class PartConverter:
-    def __init__(self, schema_converter: SchemaConverter) -> None:
-        self._schema_converter = schema_converter
+=== "Python"
 
-    def parts_to_input(
-        self,
-        parts: list[dict],
-        descriptor: object,
-    ) -> dict | str:
-        """Convert A2A message Parts to apcore module input.
+    ```python
+    class PartConverter:
+        def __init__(self, schema_converter: SchemaConverter) -> None:
+            self._schema_converter = schema_converter
 
-        Logic:
-        1. If parts is empty, raise ValueError("Message must contain at least one Part").
-        2. Exactly one Part is accepted; if more than one Part is present, raise
-           ValueError("Multiple parts are not supported; expected exactly one Part").
-        3. For DataPart with mediaType 'application/json': return data dict directly.
-        4. For TextPart when input_schema root type is 'string': return text string.
-        5. For TextPart when input_schema root type is 'object': attempt JSON parse.
-           - On parse failure: raise ValueError("Invalid JSON in TextPart").
-        6. FilePart is not supported: raise ValueError("FilePart is not supported").
-        """
+        def parts_to_input(
+            self,
+            parts: list[dict],
+            descriptor: object,
+        ) -> dict | str:
+            """Convert A2A message Parts to apcore module input.
 
-    def output_to_parts(self, output: object) -> list[dict]:
-        """Convert apcore module output to A2A Artifact Parts.
+            Logic:
+            1. If parts is empty, raise ValueError("Message must contain at least one Part").
+            2. Exactly one Part is accepted; if more than one Part is present, raise
+               ValueError("Multiple parts are not supported; expected exactly one Part").
+            3. For DataPart with mediaType 'application/json': return data dict directly.
+            4. For TextPart when input_schema root type is 'string': return text string.
+            5. For TextPart when input_schema root type is 'object': attempt JSON parse.
+               - On parse failure: raise ValueError("Invalid JSON in TextPart").
+            6. FilePart is not supported: raise ValueError("FilePart is not supported").
+            """
 
-        Logic:
-        1. If output is None: return [] (empty parts list).
-        2. If output is dict: return [DataPart(data=output, mediaType="application/json")].
-        3. If output is str: return [TextPart(text=output)].
-        4. If output is list: return [TextPart(text=json.dumps(output))].
-        5. Any other type: return [TextPart(text=str(output))].
-        """
-```
+        def output_to_parts(self, output: object) -> list[dict]:
+            """Convert apcore module output to A2A Artifact Parts.
+
+            Logic:
+            1. If output is None: return [] (empty parts list).
+            2. If output is dict: return [DataPart(data=output, mediaType="application/json")].
+            3. If output is str: return [TextPart(text=output)].
+            4. If output is list: return [TextPart(text=json.dumps(output))].
+            5. Any other type: return [TextPart(text=str(output))].
+            """
+    ```
+
+=== "TypeScript"
+
+    ```typescript
+    class PartConverter {
+      constructor(schemaConverter?: SchemaConverter)
+      partsToInput(parts: Part[], descriptor: ModuleDescriptor | null): Record<string, unknown> | string
+      outputToParts(output: unknown, taskId?: string): Artifact
+    }
+    ```
+
+=== "Rust"
+
+    ```rust
+    impl PartConverter {
+        pub fn new(schema_converter: SchemaConverter) -> Self
+        pub fn convert_result(&self, result: &Value) -> Vec<Part>
+        pub fn output_to_parts(&self, output: &Value, task_id: &str) -> Artifact
+        pub fn parts_to_input(&self, parts: &[Part], input_schema: Option<&Value>) -> Result<Value, String>
+    }
+    ```
 
 ### 4.4 Server Module (`server/`)
 
@@ -596,39 +789,68 @@ class PartConverter:
 
 **File**: `server/factory.py`
 
-```python
-class A2AServerFactory:
-    def __init__(self) -> None:
-        self._skill_mapper = SkillMapper()
-        self._schema_converter = SchemaConverter()
-        self._agent_card_builder = AgentCardBuilder(self._skill_mapper)
-        self._error_mapper = ErrorMapper()
-        self._part_converter = PartConverter(self._schema_converter)
+=== "Python"
 
-    def create(
-        self,
-        registry: object,
-        executor: object,
-        *,
-        name: str,
-        description: str,
-        version: str,
-        url: str,
-        task_store: TaskStore,
-        auth: Authenticator | None = None,
-        push_notifications: bool = False,
-        cancel_on_disconnect: bool = True,
-        execution_timeout: int = 300,
-        cors_origins: list[str] | None = None,
-        explorer: bool = False,
-        explorer_prefix: str = "/explorer",
-    ) -> tuple[Starlette, dict]:
-        """Create the ASGI application and Agent Card.
+    ```python
+    class A2AServerFactory:
+        def __init__(self) -> None:
+            self._skill_mapper = SkillMapper()
+            self._schema_converter = SchemaConverter()
+            self._agent_card_builder = AgentCardBuilder(self._skill_mapper)
+            self._error_mapper = ErrorMapper()
+            self._part_converter = PartConverter(self._schema_converter)
 
-        Returns:
-            (app, agent_card) tuple.
-        """
-```
+        def create(
+            self,
+            registry: object,
+            executor: object,
+            *,
+            name: str,
+            description: str,
+            version: str,
+            url: str,
+            task_store: TaskStore,
+            auth: Authenticator | None = None,
+            push_notifications: bool = False,
+            cancel_on_disconnect: bool = True,
+            execution_timeout: int = 300,
+            cors_origins: list[str] | None = None,
+            explorer: bool = False,
+            explorer_prefix: str = "/explorer",
+        ) -> tuple[Starlette, dict]:
+            """Create the ASGI application and Agent Card.
+
+            Returns:
+                (app, agent_card) tuple.
+            """
+    ```
+
+=== "TypeScript"
+
+    ```typescript
+    class A2AServerFactory {
+      // Returns { app: Express, agentCard: AgentCard }.
+      create(registry, executor: { callAsync(moduleId, inputs?, context?): Promise<...> }, opts: A2AServerCreateOptions): { app: Express; agentCard: AgentCard }
+      registerModule(moduleId: string, descriptor: unknown): void
+    }
+    interface A2AServerCreateOptions {
+      name; description; version; url; taskStore?; auth?; executionTimeout?;
+      corsOrigins?; pushNotifications?; explorer?; explorerPrefix?; metrics?; sysModules?;
+    }
+    ```
+
+=== "Rust"
+
+    ```rust
+    impl A2AServerFactory {
+        pub fn new() -> Self  // registers A2A namespace + error formatter
+        // Returns (axum Router, AgentCard). Host/port come from `url`; auth is an
+        // Option<Arc<dyn Authenticator>> argument (no auth config field).
+        pub fn create(&self, registry: &Registry, executor: Arc<ApCoreAgentExecutor>, task_store: Arc<dyn TaskStore>,
+                      name: &str, description: &str, version: &str, url: &str,
+                      auth: Option<Arc<dyn Authenticator>>, explorer: bool, explorer_prefix: &str) -> (Router, AgentCard)
+    }
+    ```
 
 **Creation sequence:**
 
@@ -1013,142 +1235,196 @@ class PushNotificationManager:
 
 **File**: `client/client.py`
 
-```python
-class A2AClient:
-    def __init__(
-        self,
-        url: str,
-        *,
-        auth: str | None = None,
-        timeout: float = 30.0,
-        card_ttl: float = 300.0,
-    ) -> None:
-        """Construct A2A client for a remote agent.
+=== "Python"
 
-        Args:
-            url: Base URL of the remote A2A agent (http:// or https://).
-            auth: Bearer token string (e.g., "Bearer eyJ...").
-            timeout: HTTP request timeout in seconds.
-            card_ttl: Agent Card cache TTL in seconds.
+    ```python
+    class A2AClient:
+        def __init__(
+            self,
+            url: str,
+            *,
+            auth: str | None = None,
+            timeout: float = 30.0,
+            card_ttl: float = 300.0,
+        ) -> None:
+            """Construct A2A client for a remote agent.
 
-        Raises:
-            ValueError: If url is not a valid HTTP/HTTPS URL.
-        """
-        self._validate_url(url)
-        self._url = url.rstrip("/")
-        self._timeout = timeout
-        self._http = httpx.AsyncClient(
-            timeout=timeout,
-            headers={"Authorization": auth} if auth else {},
-        )
-        self._card_fetcher = AgentCardFetcher(self._http, self._url, ttl=card_ttl)
+            Args:
+                url: Base URL of the remote A2A agent (http:// or https://).
+                auth: Bearer token string (e.g., "Bearer eyJ...").
+                timeout: HTTP request timeout in seconds.
+                card_ttl: Agent Card cache TTL in seconds.
 
-    @property
-    async def agent_card(self) -> dict:
-        """Fetch and cache the remote Agent Card."""
-        return await self._card_fetcher.fetch()
+            Raises:
+                ValueError: If url is not a valid HTTP/HTTPS URL.
+            """
+            self._validate_url(url)
+            self._url = url.rstrip("/")
+            self._timeout = timeout
+            self._http = httpx.AsyncClient(
+                timeout=timeout,
+                headers={"Authorization": auth} if auth else {},
+            )
+            self._card_fetcher = AgentCardFetcher(self._http, self._url, ttl=card_ttl)
 
-    async def send_message(
-        self,
-        message: dict,
-        *,
-        metadata: dict | None = None,
-        context_id: str | None = None,
-    ) -> dict:
-        """Send message/send and return the Task.
+        @property
+        async def agent_card(self) -> dict:
+            """Fetch and cache the remote Agent Card."""
+            return await self._card_fetcher.fetch()
 
-        Raises:
-            TaskNotFoundError: JSON-RPC -32001.
-            TaskNotCancelableError: JSON-RPC -32002.
-            A2AServerError: JSON-RPC -32603.
-            A2AConnectionError: Network-level failure.
-        """
+        async def send_message(
+            self,
+            message: dict,
+            *,
+            metadata: dict | None = None,
+            context_id: str | None = None,
+        ) -> dict:
+            """Send message/send and return the Task.
 
-    async def stream_message(
-        self,
-        message: dict,
-        *,
-        metadata: dict | None = None,
-        context_id: str | None = None,
-    ) -> AsyncGenerator[dict, None]:
-        """Send message/stream and yield SSE events.
+            Raises:
+                TaskNotFoundError: JSON-RPC -32001.
+                TaskNotCancelableError: JSON-RPC -32002.
+                A2AServerError: JSON-RPC -32603.
+                A2AConnectionError: Network-level failure.
+            """
 
-        Yields:
-            Parsed TaskStatusUpdateEvent or TaskArtifactUpdateEvent dicts.
-        """
+        async def stream_message(
+            self,
+            message: dict,
+            *,
+            metadata: dict | None = None,
+            context_id: str | None = None,
+        ) -> AsyncGenerator[dict, None]:
+            """Send message/stream and yield SSE events.
 
-    async def get_task(self, task_id: str) -> dict:
-        """Retrieve task state via tasks/get."""
+            Yields:
+                Parsed TaskStatusUpdateEvent or TaskArtifactUpdateEvent dicts.
+            """
 
-    async def cancel_task(self, task_id: str) -> dict:
-        """Cancel task via tasks/cancel."""
+        async def get_task(self, task_id: str) -> dict:
+            """Retrieve task state via tasks/get."""
 
-    async def list_tasks(
-        self,
-        context_id: str | None = None,
-        limit: int = 50,
-    ) -> dict:
-        """List tasks via tasks/list."""
+        async def cancel_task(self, task_id: str) -> dict:
+            """Cancel task via tasks/cancel."""
 
-    async def close(self) -> None:
-        """Close the underlying HTTP client."""
+        async def list_tasks(
+            self,
+            context_id: str | None = None,
+            limit: int = 50,
+        ) -> dict:
+            """List tasks via tasks/list."""
 
-    async def __aenter__(self) -> A2AClient:
-        return self
+        async def close(self) -> None:
+            """Close the underlying HTTP client."""
 
-    async def __aexit__(self, *args) -> None:
-        await self.close()
+        async def __aenter__(self) -> A2AClient:
+            return self
 
-    async def _jsonrpc_call(self, method: str, params: dict) -> dict:
-        """Send JSON-RPC 2.0 request and return result or raise error."""
+        async def __aexit__(self, *args) -> None:
+            await self.close()
 
-    def _validate_url(self, url: str) -> None:
-        """Validate url is well-formed HTTP/HTTPS. Raise ValueError otherwise."""
-```
+        async def _jsonrpc_call(self, method: str, params: dict) -> dict:
+            """Send JSON-RPC 2.0 request and return result or raise error."""
+
+        def _validate_url(self, url: str) -> None:
+            """Validate url is well-formed HTTP/HTTPS. Raise ValueError otherwise."""
+    ```
+
+=== "TypeScript"
+
+    ```typescript
+    // `timeout` is in milliseconds (default 30000); `cardTtl` in seconds (default 300).
+    new A2AClient(url: string, opts?: { auth?: string; timeout?: number; cardTtl?: number })
+    discover(): Promise<Record<string, unknown>>            // GET /.well-known/agent-card.json
+    get agentCard: Promise<Record<string, unknown>>          // getter alias
+    sendMessage(message: Record<string, unknown>, opts?: { metadata?: Record<string, unknown>; contextId?: string }): Promise<Record<string, unknown>>
+    streamMessage(message: Record<string, unknown>, opts?: { metadata?: Record<string, unknown>; contextId?: string }): AsyncGenerator<Record<string, unknown>>
+    getTask(taskId: string): Promise<Record<string, unknown>>
+    cancelTask(taskId: string): Promise<Record<string, unknown>>
+    listTasks(opts?: { contextId?: string; limit?: number }): Promise<Record<string, unknown>>
+    close(): void   // no-op
+    ```
+
+=== "Rust"
+
+    ```rust
+    // `new` panics on a bad URL; `try_new` is fallible. `timeout`/`card_ttl` are Durations.
+    pub fn new(url: impl Into<String>) -> Self
+    pub fn try_new(url: impl Into<String>, auth: Option<String>, timeout: Option<Duration>, card_ttl: Option<Duration>) -> ClientResult<Self>
+    pub async fn agent_card(&self) -> ClientResult<Value>
+    pub async fn discover(&self) -> ClientResult<Value>   // alias of agent_card
+    pub async fn send_message(&self, message: Value, metadata: Option<Value>, context_id: Option<String>) -> ClientResult<Value>
+    pub fn stream_message(&self, message: Value, metadata: Option<Value>, context_id: Option<String>) -> impl Stream<Item = ClientResult<Value>> + '_
+    pub async fn get_task(&self, task_id: &str) -> ClientResult<Value>
+    pub async fn cancel_task(&self, task_id: &str) -> ClientResult<Value>
+    pub async fn list_tasks(&self, context_id: Option<String>, limit: i64) -> ClientResult<Value>
+    pub async fn close(self)   // parity no-op
+    ```
 
 #### 4.5.2 `AgentCardFetcher`
 
 **File**: `client/card_fetcher.py`
 
-```python
-class AgentCardFetcher:
-    def __init__(
-        self,
-        http: httpx.AsyncClient,
-        base_url: str,
-        *,
-        ttl: float = 300.0,
-    ) -> None:
-        self._http = http
-        self._url = f"{base_url}/.well-known/agent-card.json"
-        self._ttl = ttl
-        self._cached: dict | None = None
-        self._cached_at: float = 0.0
+=== "Python"
 
-    async def fetch(self) -> dict:
-        """Fetch Agent Card, returning cached version if within TTL.
+    ```python
+    class AgentCardFetcher:
+        def __init__(
+            self,
+            http: httpx.AsyncClient,
+            base_url: str,
+            *,
+            ttl: float = 300.0,
+        ) -> None:
+            self._http = http
+            self._url = f"{base_url}/.well-known/agent-card.json"
+            self._ttl = ttl
+            self._cached: dict | None = None
+            self._cached_at: float = 0.0
 
-        Raises:
-            A2ADiscoveryError: HTTP error or invalid JSON.
-        """
-        now = time.monotonic()
-        if self._cached is not None and (now - self._cached_at) < self._ttl:
-            return self._cached
+        async def fetch(self) -> dict:
+            """Fetch Agent Card, returning cached version if within TTL.
 
-        response = await self._http.get(self._url)
-        if response.status_code != 200:
-            raise A2ADiscoveryError(
-                f"Agent Card fetch failed: HTTP {response.status_code} from {self._url}"
-            )
-        try:
-            card = response.json()
-        except (ValueError, json.JSONDecodeError) as e:
-            raise A2ADiscoveryError(f"Invalid JSON in Agent Card from {self._url}: {e}")
+            Raises:
+                A2ADiscoveryError: HTTP error or invalid JSON.
+            """
+            now = time.monotonic()
+            if self._cached is not None and (now - self._cached_at) < self._ttl:
+                return self._cached
 
-        self._cached = card
-        self._cached_at = now
-        return card
-```
+            response = await self._http.get(self._url)
+            if response.status_code != 200:
+                raise A2ADiscoveryError(
+                    f"Agent Card fetch failed: HTTP {response.status_code} from {self._url}"
+                )
+            try:
+                card = response.json()
+            except (ValueError, json.JSONDecodeError) as e:
+                raise A2ADiscoveryError(f"Invalid JSON in Agent Card from {self._url}: {e}")
+
+            self._cached = card
+            self._cached_at = now
+            return card
+    ```
+
+=== "TypeScript"
+
+    ```typescript
+    // ttl in seconds (default 300). On failure throws A2ADiscoveryError.
+    new AgentCardFetcher(baseUrl: string, opts?: { ttl?: number; headers?: Record<string, string> })
+    fetch(): Promise<Record<string, unknown>>
+    ```
+
+=== "Rust"
+
+    ```rust
+    // DEFAULT_TTL_SECS = 300. Returns ClientResult<Value>.
+    impl AgentCardFetcher {
+        pub fn new(http: HttpClient, base_url: impl Into<String>) -> Self
+        pub fn with_ttl(http: HttpClient, base_url: impl Into<String>, ttl: Duration) -> Self
+        pub async fn fetch(&self) -> ClientResult<Value>
+    }
+    ```
 
 ### 4.6 Auth Module (`auth/`)
 
@@ -1158,27 +1434,48 @@ class AgentCardFetcher:
 
 **File**: `auth/protocol.py`
 
-```python
-from typing import Protocol, runtime_checkable
+=== "Python"
 
-@runtime_checkable
-class Authenticator(Protocol):
-    def authenticate(self, headers: dict[str, str]) -> Identity | None:
-        """Validate credentials from HTTP headers.
+    ```python
+    from typing import Protocol, runtime_checkable
 
-        Args:
-            headers: Lowercase-keyed HTTP header dict.
+    @runtime_checkable
+    class Authenticator(Protocol):
+        def authenticate(self, headers: dict[str, str]) -> Identity | None:
+            """Validate credentials from HTTP headers.
 
-        Returns:
-            Identity on success, None on invalid/missing credentials.
-        """
-        ...
+            Args:
+                headers: Lowercase-keyed HTTP header dict.
 
-    def security_schemes(self) -> dict:
-        """Return the A2A 1.0 keyed securitySchemes map for the Agent Card,
-        e.g. {"bearerAuth": {"type": "http", "scheme": "bearer", "bearerFormat": "JWT"}}."""
-        ...
-```
+            Returns:
+                Identity on success, None on invalid/missing credentials.
+            """
+            ...
+
+        def security_schemes(self) -> dict:
+            """Return the A2A 1.0 keyed securitySchemes map for the Agent Card,
+            e.g. {"bearerAuth": {"type": "http", "scheme": "bearer", "bearerFormat": "JWT"}}."""
+            ...
+    ```
+
+=== "TypeScript"
+
+    ```typescript
+    export interface Authenticator {
+      authenticate(headers: Record<string, string>): Identity | null;
+      securitySchemes(): Record<string, unknown>;
+    }
+    ```
+
+=== "Rust"
+
+    ```rust
+    #[async_trait]
+    pub trait Authenticator: Send + Sync {
+        async fn authenticate(&self, headers: &HashMap<String, String>) -> Option<Identity>;
+        fn security_schemes(&self) -> Option<Value>;
+    }
+    ```
 
 #### 4.6.2 `JWTAuthenticator`
 
@@ -1186,25 +1483,53 @@ class Authenticator(Protocol):
 
 Follows the same pattern as apcore-mcp's `JWTAuthenticator`:
 
-```python
-class JWTAuthenticator:
-    def __init__(
-        self,
-        key: str,
-        *,
-        algorithms: list[str] | None = None,
-        audience: str | None = None,
-        issuer: str | None = None,
-        claim_mapping: ClaimMapping | None = None,
-        require_claims: list[str] | None = None,
-    ) -> None: ...
+=== "Python"
 
-    def authenticate(self, headers: dict[str, str]) -> Identity | None:
-        """Extract Bearer token, decode JWT, return Identity."""
+    ```python
+    class JWTAuthenticator:
+        def __init__(
+            self,
+            key: str,
+            *,
+            algorithms: list[str] | None = None,
+            audience: str | None = None,
+            issuer: str | None = None,
+            claim_mapping: ClaimMapping | None = None,
+            require_claims: list[str] | None = None,
+        ) -> None: ...
 
-    def security_schemes(self) -> dict:
-        return {"bearerAuth": {"type": "http", "scheme": "bearer", "bearerFormat": "JWT"}}
-```
+        def authenticate(self, headers: dict[str, str]) -> Identity | None:
+            """Extract Bearer token, decode JWT, return Identity."""
+
+        def security_schemes(self) -> dict:
+            return {"bearerAuth": {"type": "http", "scheme": "bearer", "bearerFormat": "JWT"}}
+    ```
+
+=== "TypeScript"
+
+    ```typescript
+    // ClaimMapping fields are camelCase: idClaim, typeClaim, rolesClaim, attrsClaims.
+    new JWTAuthenticator(key: string, opts?: JWTAuthenticatorOptions)
+    export interface JWTAuthenticatorOptions {
+      algorithms?: jwt.Algorithm[]; // ["HS256"]
+      audience?: string; issuer?: string;
+      claimMapping?: ClaimMapping; requireClaims?: string[]; // ["sub"]
+    }
+    // securitySchemes() -> { bearerAuth: { type: "http", scheme: "bearer", bearerFormat: "JWT" } }
+    ```
+
+=== "Rust"
+
+    ```rust
+    // Builder methods; ClaimMapping fields are snake_case (id_claim, type_claim, ...).
+    pub fn new(secret: impl Into<String>) -> Self
+    pub fn with_claim_mapping(mut self, mapping: ClaimMapping) -> Self
+    pub fn with_require_claims(mut self, claims: Vec<String>) -> Self
+    pub fn with_algorithms(mut self, algorithms: Vec<Algorithm>) -> Self
+    pub fn with_audience(mut self, audience: impl Into<String>) -> Self
+    pub fn with_issuer(mut self, issuer: impl Into<String>) -> Self
+    // security_schemes() -> { "bearerAuth": { "type": "http", "scheme": "bearer", "bearerFormat": "JWT" } }
+    ```
 
 Token validation checks: signature, expiration (`exp`), issuer (`iss`), audience (`aud`). Claims mapping: `sub` -> `Identity.id`, `type` -> `Identity.type`, `roles` -> `Identity.roles`, configurable via `ClaimMapping`.
 
@@ -1214,32 +1539,52 @@ Token validation checks: signature, expiration (`exp`), issuer (`iss`), audience
 
 Follows the same ASGI middleware pattern as apcore-mcp's `AuthMiddleware`:
 
-```python
-auth_identity_var: ContextVar[Identity | None] = ContextVar("auth_identity", default=None)
+=== "Python"
 
-class AuthMiddleware:
-    def __init__(
-        self,
-        app: ASGIApp,
-        authenticator: Authenticator,
-        *,
-        exempt_paths: set[str] | None = None,
-        exempt_prefixes: set[str] | None = None,
-        require_auth: bool = True,
-    ) -> None: ...
+    ```python
+    auth_identity_var: ContextVar[Identity | None] = ContextVar("auth_identity", default=None)
 
-    async def __call__(self, scope, receive, send) -> None:
-        """ASGI middleware entry point.
+    class AuthMiddleware:
+        def __init__(
+            self,
+            app: ASGIApp,
+            authenticator: Authenticator,
+            *,
+            exempt_paths: set[str] | None = None,
+            exempt_prefixes: set[str] | None = None,
+            require_auth: bool = True,
+        ) -> None: ...
 
-        1. Skip non-HTTP scopes.
-        2. Skip exempt paths (/.well-known/agent-card.json, /.well-known/agent.json, /health, /metrics).
-        3. Extract headers, call authenticator.authenticate(headers).
-        4. If None and require_auth: send 401 with WWW-Authenticate: Bearer.
-        5. Set auth_identity_var ContextVar.
-        6. Call downstream app.
-        7. Reset ContextVar in finally block.
-        """
-```
+        async def __call__(self, scope, receive, send) -> None:
+            """ASGI middleware entry point.
+
+            1. Skip non-HTTP scopes.
+            2. Skip exempt paths (/.well-known/agent-card.json, /.well-known/agent.json, /health, /metrics).
+            3. Extract headers, call authenticator.authenticate(headers).
+            4. If None and require_auth: send 401 with WWW-Authenticate: Bearer.
+            5. Set auth_identity_var ContextVar.
+            6. Call downstream app.
+            7. Reset ContextVar in finally block.
+            """
+    ```
+
+=== "TypeScript"
+
+    ```typescript
+    // Express middleware factory; identity is stored in an AsyncLocalStorage.
+    createAuthMiddleware(opts: { authenticator: Authenticator; exemptPaths?: Set<string>; exemptPrefixes?: Set<string>; requireAuth?: boolean }): ExpressMiddleware
+    authIdentityStore: AsyncLocalStorage<Identity | null>;
+    getAuthIdentity(): Identity | null;
+    ```
+
+=== "Rust"
+
+    ```rust
+    // Axum tower layer; identity is stored in request extensions under AUTH_IDENTITY.
+    AuthMiddlewareLayer::new(authenticator: Arc<dyn Authenticator>, exempt_paths: Vec<String>) -> Self  // strict (require_auth=true)
+    AuthMiddlewareLayer::with_require_auth(authenticator: Arc<dyn Authenticator>, exempt_paths: Vec<String>, require_auth: bool) -> Self
+    pub const AUTH_IDENTITY: &str = "auth_identity";
+    ```
 
 Default exempt paths: `{"/.well-known/agent-card.json", "/.well-known/agent.json", "/health", "/metrics"}`. Explorer prefix is added to exempt prefixes when explorer is enabled.
 
@@ -1253,79 +1598,127 @@ Default exempt paths: `{"/.well-known/agent-card.json", "/.well-known/agent.json
 
 **File**: `storage/protocol.py`
 
-```python
-from typing import Protocol, runtime_checkable
+> The Python protocol below reflects the original design intent. The shipped
+> task-persistence surface differs per language: TypeScript re-exports the
+> `@a2a-js/sdk/server` `TaskStore` (`save`/`load`/`delete`/`list`); Rust defines a
+> narrower `TaskStore` trait (`save`/`get`/`delete`/`list`).
 
-@runtime_checkable
-class TaskStore(Protocol):
-    async def save(self, task: dict) -> None:
-        """Persist a task. Overwrites if task with same id exists."""
-        ...
+=== "Python"
 
-    async def get(self, task_id: str) -> dict | None:
-        """Retrieve task by ID. Returns None if not found."""
-        ...
+    ```python
+    from typing import Protocol, runtime_checkable
 
-    async def list(
-        self,
-        context_id: str | None = None,
-        cursor: str | None = None,
-        limit: int = 50,
-    ) -> dict:
-        """List tasks. Returns {tasks: [...], nextCursor: str|None}."""
-        ...
+    @runtime_checkable
+    class TaskStore(Protocol):
+        async def save(self, task: dict) -> None:
+            """Persist a task. Overwrites if task with same id exists."""
+            ...
 
-    async def delete(self, task_id: str) -> bool:
-        """Delete task. Returns True if deleted, False if not found."""
-        ...
+        async def get(self, task_id: str) -> dict | None:
+            """Retrieve task by ID. Returns None if not found."""
+            ...
 
-    async def update_status(self, task_id: str, status: dict) -> dict:
-        """Update task status. Returns updated task. Raises KeyError if not found."""
-        ...
+        async def list(
+            self,
+            context_id: str | None = None,
+            cursor: str | None = None,
+            limit: int = 50,
+        ) -> dict:
+            """List tasks. Returns {tasks: [...], nextCursor: str|None}."""
+            ...
 
-    async def save_push_config(self, task_id: str, config: dict) -> None:
-        """Save push notification config for a task."""
-        ...
+        async def delete(self, task_id: str) -> bool:
+            """Delete task. Returns True if deleted, False if not found."""
+            ...
 
-    async def get_push_config(self, task_id: str) -> dict | None:
-        """Get push notification config. Returns None if not configured."""
-        ...
+        async def update_status(self, task_id: str, status: dict) -> dict:
+            """Update task status. Returns updated task. Raises KeyError if not found."""
+            ...
 
-    async def delete_push_config(self, task_id: str) -> bool:
-        """Delete push notification config. Returns True if deleted."""
-        ...
+        async def save_push_config(self, task_id: str, config: dict) -> None:
+            """Save push notification config for a task."""
+            ...
 
-    async def save_context(self, context_id: str, messages: list) -> None:
-        """Save conversation context messages."""
-        ...
+        async def get_push_config(self, task_id: str) -> dict | None:
+            """Get push notification config. Returns None if not configured."""
+            ...
 
-    async def get_context(self, context_id: str) -> list | None:
-        """Get conversation context messages. Returns None if not found."""
-        ...
-```
+        async def delete_push_config(self, task_id: str) -> bool:
+            """Delete push notification config. Returns True if deleted."""
+            ...
+
+        async def save_context(self, context_id: str, messages: list) -> None:
+            """Save conversation context messages."""
+            ...
+
+        async def get_context(self, context_id: str) -> list | None:
+            """Get conversation context messages. Returns None if not found."""
+            ...
+    ```
+
+=== "TypeScript"
+
+    ```typescript
+    // Re-exported from @a2a-js/sdk/server.
+    export type { TaskStore } from "@a2a-js/sdk/server";
+    interface TaskStore {
+      save(taskId: string, task: TaskData, context: unknown): Promise<void>;
+      load(taskId: string, context: unknown): Promise<TaskData | null>;
+      delete(taskId: string, context: unknown): Promise<void>;
+      list(...args: unknown[]): Promise<TaskData[]>;
+    }
+    ```
+
+=== "Rust"
+
+    ```rust
+    #[async_trait]
+    pub trait TaskStore: Send + Sync {
+        async fn save(&self, task_id: &str, task: Value) -> Result<(), String>;
+        async fn get(&self, task_id: &str) -> Result<Option<Value>, String>;
+        async fn delete(&self, task_id: &str) -> Result<(), String>;
+        async fn list(&self) -> Result<Vec<Value>, String>;
+    }
+    ```
 
 #### 4.7.2 `InMemoryTaskStore`
 
 **File**: `storage/memory.py`
 
-```python
-class InMemoryTaskStore:
-    def __init__(
-        self,
-        *,
-        max_capacity: int = 10_000,
-        ttl_seconds: float = 3600.0,
-        max_context_messages: int = 100,
-    ) -> None:
-        self._tasks: dict[str, dict] = {}
-        self._contexts: dict[str, list] = {}
-        self._push_configs: dict[str, dict] = {}
-        self._created_at: dict[str, float] = {}
-        self._lock = asyncio.Lock()
-        self._max_capacity = max_capacity
-        self._ttl_seconds = ttl_seconds
-        self._max_context_messages = max_context_messages
-```
+=== "Python"
+
+    ```python
+    class InMemoryTaskStore:
+        def __init__(
+            self,
+            *,
+            max_capacity: int = 10_000,
+            ttl_seconds: float = 3600.0,
+            max_context_messages: int = 100,
+        ) -> None:
+            self._tasks: dict[str, dict] = {}
+            self._contexts: dict[str, list] = {}
+            self._push_configs: dict[str, dict] = {}
+            self._created_at: dict[str, float] = {}
+            self._lock = asyncio.Lock()
+            self._max_capacity = max_capacity
+            self._ttl_seconds = ttl_seconds
+            self._max_context_messages = max_context_messages
+    ```
+
+=== "TypeScript"
+
+    ```typescript
+    // Re-exported from @a2a-js/sdk/server.
+    export { InMemoryTaskStore } from "@a2a-js/sdk/server";
+    ```
+
+=== "Rust"
+
+    ```rust
+    pub struct InMemoryTaskStore { /* Mutex<HashMap<String, Value>> */ }
+    impl InMemoryTaskStore { pub fn new() -> Self }
+    ```
 
 **Eviction policy**: When capacity is reached during `save()`:
 1. Evict expired tasks first (tasks whose `created_at + ttl < now`).
@@ -1342,16 +1735,33 @@ class InMemoryTaskStore:
 
 **File**: `explorer/__init__.py`, `explorer/index.html`
 
-```python
-def create_explorer_mount(
-    agent_card: dict,
-    router: ExecutionRouter,
-    *,
-    explorer_prefix: str = "/explorer",
-    authenticator: Authenticator | None = None,
-) -> Mount:
-    """Create Starlette Mount for the Explorer UI."""
-```
+=== "Python"
+
+    ```python
+    def create_explorer_mount(
+        agent_card: dict,
+        router: ExecutionRouter,
+        *,
+        explorer_prefix: str = "/explorer",
+        authenticator: Authenticator | None = None,
+    ) -> Mount:
+        """Create Starlette Mount for the Explorer UI."""
+    ```
+
+=== "TypeScript"
+
+    ```typescript
+    // Express router mounted at explorerPrefix (default "/explorer") when explorer: true.
+    // GET / serves the SPA html; GET /agent-card returns the card + _inputSchemas.
+    createExplorerRouter(agentCard, { registry? }): Router
+    ```
+
+=== "Rust"
+
+    > Enabled via `config.explorer = true`; the routes are wired by
+    > `A2AServerFactory::create` (no standalone mount factory). `GET /explorer`
+    > serves embedded HTML (`include_str!`); `GET /explorer/agent-card` serves the
+    > card + `_inputSchemas`.
 
 The Explorer is a single self-contained HTML file (no external CDN dependencies) that provides:
 - Agent Card metadata display (name, description, version, capabilities).
@@ -1368,31 +1778,61 @@ Explorer GET endpoints are exempt from JWT authentication. POST endpoints (messa
 
 **File**: `__main__.py`
 
-```python
-def main() -> None:
-    parser = argparse.ArgumentParser(
-        prog="apcore-a2a",
-        description="Launch an A2A agent server from apcore modules",
-    )
-    parser.add_argument("--version", action="version", version=f"%(prog)s {__version__}")
+=== "Python"
 
-    subparsers = parser.add_subparsers(dest="command")
-    serve_parser = subparsers.add_parser("serve", help="Start A2A server")
-    serve_parser.add_argument("--extensions-dir", required=True, help="Path to extensions directory")
-    serve_parser.add_argument("--host", default="0.0.0.0", help="Bind host (default: 0.0.0.0)")
-    serve_parser.add_argument("--port", type=int, default=8000, help="Bind port (default: 8000)")
-    serve_parser.add_argument("--name", default=None, help="Agent name")
-    serve_parser.add_argument("--description", default=None, help="Agent description")
-    serve_parser.add_argument("--version-str", default=None, dest="agent_version", help="Agent version")
-    serve_parser.add_argument("--auth-type", choices=["bearer"], default=None, help="Auth type")
-    serve_parser.add_argument("--auth-issuer", default=None, help="JWT issuer URL")
-    serve_parser.add_argument("--auth-key", default=None, help="JWT verification key")
-    serve_parser.add_argument("--push-notifications", action="store_true", help="Enable push notifications")
-    serve_parser.add_argument("--explorer", action="store_true", help="Enable Explorer UI")
-    serve_parser.add_argument("--log-level", choices=["debug","info","warning","error"], default="info")
+    ```python
+    def main() -> None:
+        parser = argparse.ArgumentParser(
+            prog="apcore-a2a",
+            description="Launch an A2A agent server from apcore modules",
+        )
+        parser.add_argument("--version", action="version", version=f"%(prog)s {__version__}")
 
-    args = parser.parse_args()
-```
+        subparsers = parser.add_subparsers(dest="command")
+        serve_parser = subparsers.add_parser("serve", help="Start A2A server")
+        serve_parser.add_argument("--extensions-dir", required=True, help="Path to extensions directory")
+        serve_parser.add_argument("--host", default="0.0.0.0", help="Bind host (default: 0.0.0.0)")
+        serve_parser.add_argument("--port", type=int, default=8000, help="Bind port (default: 8000)")
+        serve_parser.add_argument("--name", default=None, help="Agent name")
+        serve_parser.add_argument("--description", default=None, help="Agent description")
+        serve_parser.add_argument("--version-str", default=None, dest="agent_version", help="Agent version")
+        serve_parser.add_argument("--auth-type", choices=["bearer"], default=None, help="Auth type")
+        serve_parser.add_argument("--auth-issuer", default=None, help="JWT issuer URL")
+        serve_parser.add_argument("--auth-key", default=None, help="JWT verification key")
+        serve_parser.add_argument("--push-notifications", action="store_true", help="Enable push notifications")
+        serve_parser.add_argument("--explorer", action="store_true", help="Enable Explorer UI")
+        serve_parser.add_argument("--log-level", choices=["debug","info","warning","error"], default="info")
+
+        args = parser.parse_args()
+    ```
+
+=== "TypeScript"
+
+    ```typescript
+    // Bin `apcore-a2a`. Invoke: npx apcore-a2a serve --extensions-dir <path> [opts]
+    // Flags: --extensions-dir (required), --host (127.0.0.1), --port (8000), --name,
+    //   --description, --version-str, --url, --auth-type bearer, --auth-key,
+    //   --auth-issuer, --auth-audience, --push-notifications, --explorer,
+    //   --cors-origins, --execution-timeout (300), --log-level (info), --metrics.
+    export function main(): void
+    export function resolveAuthKey(authKey?: string): string | undefined
+    ```
+
+=== "Rust"
+
+    ```rust
+    // Binary `apcore-a2a`. Invoke: apcore-a2a --extensions-dir ./extensions --name "X" --port 8000
+    // (No auth/explorer/metrics CLI flags in Rust.)
+    #[derive(Parser)]
+    #[command(name = "apcore-a2a", version, about = "A2A protocol adapter for apcore")]
+    pub struct Cli {
+        #[arg(short, long, default_value = "./extensions")] pub extensions_dir: String,
+        #[arg(short, long, default_value = "apcore-a2a")] pub name: String,
+        #[arg(long, default_value = "http://localhost:8000")] pub url: String,
+        #[arg(short, long, default_value_t = 8000)] pub port: u16,
+    }
+    pub fn run() -> Result<(), Box<dyn std::error::Error>>
+    ```
 
 **Exit codes:**
 - `0`: Clean shutdown (SIGINT/SIGTERM).
@@ -1737,29 +2177,74 @@ data: {"statusUpdate":{"taskId":"task-uuid","contextId":"ctx-uuid","status":{"st
 
 #### `A2AClient.send_message(message, *, metadata, context_id)`
 
-```python
-async def send_message(
-    self,
-    message: dict,           # {"role": "user", "parts": [...]}
-    *,
-    metadata: dict | None,   # {"skillId": "image.resize"}
-    context_id: str | None,  # Optional UUID v4
-) -> dict:                   # Returns Task object
-```
+=== "Python"
+
+    ```python
+    async def send_message(
+        self,
+        message: dict,           # {"role": "user", "parts": [...]}
+        *,
+        metadata: dict | None,   # {"skillId": "image.resize"}
+        context_id: str | None,  # Optional UUID v4
+    ) -> dict:                   # Returns Task object
+    ```
+
+=== "TypeScript"
+
+    ```typescript
+    sendMessage(
+      message: Record<string, unknown>,                 // { role: "user", parts: [...] }
+      opts?: { metadata?: Record<string, unknown>; contextId?: string }, // { metadata: { skillId: "image.resize" } }
+    ): Promise<Record<string, unknown>>                 // Returns Task object
+    ```
+
+=== "Rust"
+
+    ```rust
+    pub async fn send_message(
+        &self,
+        message: Value,                 // { "role": "ROLE_USER", "parts": [...] }
+        metadata: Option<Value>,        // Some(json!({ "skillId": "image.resize" }))
+        context_id: Option<String>,     // optional context id
+    ) -> ClientResult<Value>            // Returns Task object
+    ```
 
 Constructs a `message/send` JSON-RPC request, sends via HTTP POST, parses the JSON-RPC response. On JSON-RPC error, raises the corresponding typed exception. On HTTP-level error, raises `A2AConnectionError`.
 
 #### `A2AClient.stream_message(message, *, metadata, context_id)`
 
-```python
-async def stream_message(
-    self,
-    message: dict,
-    *,
-    metadata: dict | None,
-    context_id: str | None,
-) -> AsyncGenerator[dict, None]:  # Yields SSE events
-```
+=== "Python"
+
+    ```python
+    async def stream_message(
+        self,
+        message: dict,
+        *,
+        metadata: dict | None,
+        context_id: str | None,
+    ) -> AsyncGenerator[dict, None]:  # Yields SSE events
+    ```
+
+=== "TypeScript"
+
+    ```typescript
+    streamMessage(
+      message: Record<string, unknown>,
+      opts?: { metadata?: Record<string, unknown>; contextId?: string },
+    ): AsyncGenerator<Record<string, unknown>>  // Yields SSE events
+    ```
+
+=== "Rust"
+
+    ```rust
+    // Returns impl Stream; consume with `use futures_util::StreamExt;`.
+    pub fn stream_message(
+        &self,
+        message: Value,
+        metadata: Option<Value>,
+        context_id: Option<String>,
+    ) -> impl Stream<Item = ClientResult<Value>> + '_  // Yields SSE events
+    ```
 
 Sends `message/stream` request. Opens an SSE connection using `httpx` streaming. Parses each SSE event's `data` field as JSON and yields it. Terminates when the stream closes or a terminal event is received.
 
@@ -2279,9 +2764,26 @@ apcore 0.22 exposes an `ErrorFormatterRegistry` that lets integrations advertise
 named, discoverable error formatter. On startup, every apcore-a2a SDK registers its
 `ErrorMapper` under the `"a2a"` key:
 
-```python
-ErrorFormatterRegistry.register("a2a", ErrorMapper())
-```
+=== "Python"
+
+    ```python
+    ErrorFormatterRegistry.register("a2a", ErrorMapper())
+    ```
+
+=== "TypeScript"
+
+    ```typescript
+    // The ErrorMapper is registered under the "a2a" key during server setup.
+    import { ErrorMapper } from "apcore-a2a";
+    ```
+
+=== "Rust"
+
+    ```rust
+    // Idempotent; registers the A2aErrorFormatter under the "a2a" key.
+    use apcore_a2a::register_a2a_error_formatter;
+    register_a2a_error_formatter();
+    ```
 
 This makes the A2A error-to-JSON-RPC mapping (see §4.3.4 and §9.1) discoverable by
 the wider apcore ecosystem — other apcore components can look up the `"a2a"`
@@ -2605,134 +3107,315 @@ def client(a2a_app):
 
 ### 13.1 Package Structure
 
-```
-apcore-a2a-python/
-  src/
-    apcore_a2a/
-      __init__.py           # serve(), async_serve(), re-exports
-      __main__.py           # CLI entry point
-      _utils.py             # resolve_registry(), resolve_executor()
-      constants.py          # Error codes, patterns
-      adapters/
-        __init__.py
-        agent_card.py       # AgentCardBuilder
-        skill_mapper.py     # SkillMapper
-        schema.py           # SchemaConverter
-        errors.py           # ErrorMapper
-        parts.py            # PartConverter
-      server/
-        __init__.py
-        factory.py          # A2AServerFactory
-        router.py           # ExecutionRouter
-        task_manager.py     # TaskManager
-        transport.py        # TransportManager
-        streaming.py        # StreamingHandler
-        push.py             # PushNotificationManager
-      client/
-        __init__.py
-        client.py           # A2AClient
-        card_fetcher.py     # AgentCardFetcher
-        exceptions.py       # A2AConnectionError, A2ADiscoveryError, etc.
-      auth/
-        __init__.py
-        protocol.py         # Authenticator protocol
-        jwt.py              # JWTAuthenticator
-        middleware.py        # AuthMiddleware
-      storage/
-        __init__.py
-        protocol.py         # TaskStore protocol
-        memory.py           # InMemoryTaskStore
-      explorer/
-        __init__.py
-        index.html          # Self-contained Explorer UI
-  tests/
-    conftest.py
-    unit/
-    integration/
-    e2e/
-  pyproject.toml
-  Dockerfile
-  docker-compose.yml
-  LICENSE
-```
+=== "Python"
 
-### 13.2 `pyproject.toml`
+    ```
+    apcore-a2a-python/
+      src/
+        apcore_a2a/
+          __init__.py           # serve(), async_serve(), re-exports
+          __main__.py           # CLI entry point
+          _utils.py             # resolve_registry(), resolve_executor()
+          constants.py          # Error codes, patterns
+          adapters/
+            __init__.py
+            agent_card.py       # AgentCardBuilder
+            skill_mapper.py     # SkillMapper
+            schema.py           # SchemaConverter
+            errors.py           # ErrorMapper
+            parts.py            # PartConverter
+          server/
+            __init__.py
+            factory.py          # A2AServerFactory
+            router.py           # ExecutionRouter
+            task_manager.py     # TaskManager
+            transport.py        # TransportManager
+            streaming.py        # StreamingHandler
+            push.py             # PushNotificationManager
+          client/
+            __init__.py
+            client.py           # A2AClient
+            card_fetcher.py     # AgentCardFetcher
+            exceptions.py       # A2AConnectionError, A2ADiscoveryError, etc.
+          auth/
+            __init__.py
+            protocol.py         # Authenticator protocol
+            jwt.py              # JWTAuthenticator
+            middleware.py        # AuthMiddleware
+          storage/
+            __init__.py
+            protocol.py         # TaskStore protocol
+            memory.py           # InMemoryTaskStore
+          explorer/
+            __init__.py
+            index.html          # Self-contained Explorer UI
+      tests/
+        conftest.py
+        unit/
+        integration/
+        e2e/
+      pyproject.toml
+      Dockerfile
+      docker-compose.yml
+      LICENSE
+    ```
 
-```toml
-[build-system]
-requires = ["hatchling"]
-build-backend = "hatchling.build"
+=== "TypeScript"
 
-[project]
-name = "apcore-a2a"
-version = "0.1.0"
-description = "Automatic A2A Protocol Adapter for apcore Module Registry"
-readme = "README.md"
-license = "Apache-2.0"
-requires-python = ">=3.11"
-dependencies = [
-    "apcore>=0.22.0",
-    "a2a-sdk>=0.3.0",
-    "starlette>=0.27",
-    "uvicorn>=0.23",
-    "httpx>=0.24",
-]
+    ```
+    apcore-a2a-typescript/
+      src/
+        index.ts              # serve(), asyncServe(), re-exports (≈ __init__.py)
+        serve.ts              # serve()/asyncServe() impl (≈ _serve.py)
+        cli.ts                # CLI entry point (bin apcore-a2a)
+        adapters/
+          agent-card.ts       # AgentCardBuilder
+          skill-mapper.ts     # SkillMapper
+          schema.ts           # SchemaConverter
+          errors.ts           # ErrorMapper
+          parts.ts            # PartConverter
+        server/
+          factory.ts          # A2AServerFactory
+          executor.ts         # ApCoreAgentExecutor
+        client/
+          client.ts           # A2AClient
+          card-fetcher.ts     # AgentCardFetcher
+          exceptions.ts       # A2AClientError, A2ADiscoveryError, etc.
+        auth/
+          types.ts            # Authenticator interface
+          jwt.ts              # JWTAuthenticator
+          middleware.ts       # createAuthMiddleware
+          storage.ts          # authIdentityStore, getAuthIdentity
+        storage/
+          index.ts            # TaskStore / InMemoryTaskStore re-exports
+        explorer/
+          handler.ts          # createExplorerRouter (self-contained UI)
+      test/
+      package.json
+      tsconfig.json
+      Dockerfile
+      docker-compose.yml
+      LICENSE
+    ```
 
-[project.optional-dependencies]
-auth = ["PyJWT>=2.8"]
-dev = [
-    "pytest>=7.0",
-    "pytest-asyncio>=0.23",
-    "pytest-cov>=4.0",
-    "mypy>=1.8",
-    "ruff>=0.3",
-    "respx>=0.20",
-]
+=== "Rust"
 
-[project.scripts]
-apcore-a2a = "apcore_a2a.__main__:main"
+    ```
+    apcore-a2a-rust/
+      src/
+        lib.rs                # public re-exports (≈ __init__.py)
+        apcore_a2a.rs         # serve()/async_serve()/build_app() (≈ _serve.py)
+        cli.rs                # CLI parser
+        bin/
+          apcore-a2a.rs       # binary entry point
+        adapters/
+          agent_card.rs       # AgentCardBuilder
+          skill_mapper.rs     # SkillMapper
+          schema.rs           # SchemaConverter
+          errors.rs           # ErrorMapper / A2aErrorFormatter
+          parts.rs            # PartConverter
+        server/
+          factory.rs          # A2AServerFactory
+          executor.rs         # ApCoreAgentExecutor
+          handlers.rs         # JSON-RPC / SSE / push handlers
+        client/
+          client.rs           # A2AClient
+        auth/
+          jwt.rs              # JWTAuthenticator
+          protocol.rs         # Authenticator trait
+          middleware.rs       # AuthMiddlewareLayer
+        storage/
+          mod.rs              # TaskStore trait / InMemoryTaskStore
+        explorer/
+          mod.rs              # explorer routes (embedded HTML)
+      tests/
+      Cargo.toml
+      Dockerfile
+      docker-compose.yml
+      LICENSE
+    ```
 
-[tool.pytest.ini_options]
-asyncio_mode = "auto"
-testpaths = ["tests"]
+### 13.2 Package Manifest
 
-[tool.mypy]
-strict = true
-python_version = "3.11"
+=== "Python"
 
-[tool.ruff]
-target-version = "py311"
-line-length = 120
-```
+    ```toml
+    # pyproject.toml
+    [build-system]
+    requires = ["hatchling"]
+    build-backend = "hatchling.build"
+
+    [project]
+    name = "apcore-a2a"
+    version = "0.1.0"
+    description = "Automatic A2A Protocol Adapter for apcore Module Registry"
+    readme = "README.md"
+    license = "Apache-2.0"
+    requires-python = ">=3.11"
+    dependencies = [
+        "apcore>=0.22.0",
+        "a2a-sdk>=0.3.0",
+        "starlette>=0.27",
+        "uvicorn>=0.23",
+        "httpx>=0.24",
+    ]
+
+    [project.optional-dependencies]
+    auth = ["PyJWT>=2.8"]
+    dev = [
+        "pytest>=7.0",
+        "pytest-asyncio>=0.23",
+        "pytest-cov>=4.0",
+        "mypy>=1.8",
+        "ruff>=0.3",
+        "respx>=0.20",
+    ]
+
+    [project.scripts]
+    apcore-a2a = "apcore_a2a.__main__:main"
+
+    [tool.pytest.ini_options]
+    asyncio_mode = "auto"
+    testpaths = ["tests"]
+
+    [tool.mypy]
+    strict = true
+    python_version = "3.11"
+
+    [tool.ruff]
+    target-version = "py311"
+    line-length = 120
+    ```
+
+=== "TypeScript"
+
+    ```json
+    // package.json (ESM, Node >=18)
+    {
+      "name": "apcore-a2a",
+      "version": "0.4.0",
+      "type": "module",
+      "description": "Automatic A2A Protocol Adapter for apcore Module Registry",
+      "license": "Apache-2.0",
+      "bin": { "apcore-a2a": "dist/cli.js" },
+      "engines": { "node": ">=18" },
+      "dependencies": {
+        "@a2a-js/sdk": "^0.3.0",
+        "express": "^4.19",
+        "jsonwebtoken": "^9.0"
+      },
+      "devDependencies": {
+        "typescript": "^5.4",
+        "vitest": "^1.5",
+        "supertest": "^7.0"
+      }
+    }
+    ```
+
+=== "Rust"
+
+    ```toml
+    # Cargo.toml (edition 2021)
+    [package]
+    name = "apcore-a2a"
+    version = "0.4.0"
+    edition = "2021"
+    license = "Apache-2.0"
+    description = "A2A protocol adapter for apcore"
+
+    [dependencies]
+    apcore = "0.22"
+    apcore-toolkit = "0.8"
+    axum = "0.8"
+    tokio = { version = "1", features = ["full"] }
+    async-trait = "0.1"
+    serde_json = "1"
+    jsonwebtoken = "9"
+    futures-util = "0.3"
+
+    [[bin]]
+    name = "apcore-a2a"
+    path = "src/bin/apcore-a2a.rs"
+    ```
 
 ### 13.3 Docker Setup
 
 **Dockerfile:**
 
-```dockerfile
-FROM python:3.11-slim
+=== "Python"
 
-WORKDIR /app
+    ```dockerfile
+    FROM python:3.11-slim
 
-COPY pyproject.toml .
-RUN pip install --no-cache-dir .
+    WORKDIR /app
 
-COPY src/ src/
+    COPY pyproject.toml .
+    RUN pip install --no-cache-dir .
 
-# Default: serve with extensions from /app/extensions
-ENV EXTENSIONS_DIR=/app/extensions
-ENV HOST=0.0.0.0
-ENV PORT=8000
-ENV LOG_LEVEL=info
+    COPY src/ src/
 
-EXPOSE 8000
+    # Default: serve with extensions from /app/extensions
+    ENV EXTENSIONS_DIR=/app/extensions
+    ENV HOST=0.0.0.0
+    ENV PORT=8000
+    ENV LOG_LEVEL=info
 
-CMD ["python", "-m", "apcore_a2a", "serve", \
-     "--extensions-dir", "${EXTENSIONS_DIR}", \
-     "--host", "${HOST}", \
-     "--port", "${PORT}", \
-     "--log-level", "${LOG_LEVEL}"]
-```
+    EXPOSE 8000
+
+    CMD ["python", "-m", "apcore_a2a", "serve", \
+         "--extensions-dir", "${EXTENSIONS_DIR}", \
+         "--host", "${HOST}", \
+         "--port", "${PORT}", \
+         "--log-level", "${LOG_LEVEL}"]
+    ```
+
+=== "TypeScript"
+
+    ```dockerfile
+    FROM node:20-slim
+
+    WORKDIR /app
+
+    COPY package.json package-lock.json ./
+    RUN npm ci --omit=dev
+
+    COPY dist/ dist/
+
+    # Default: serve with extensions from /app/extensions
+    ENV EXTENSIONS_DIR=/app/extensions
+    ENV HOST=0.0.0.0
+    ENV PORT=8000
+    ENV LOG_LEVEL=info
+
+    EXPOSE 8000
+
+    CMD ["node", "dist/cli.js", "serve", \
+         "--extensions-dir", "${EXTENSIONS_DIR}", \
+         "--host", "${HOST}", \
+         "--port", "${PORT}", \
+         "--log-level", "${LOG_LEVEL}"]
+    ```
+
+=== "Rust"
+
+    ```dockerfile
+    FROM rust:1-slim AS build
+    WORKDIR /app
+    COPY Cargo.toml Cargo.lock ./
+    COPY src/ src/
+    RUN cargo build --release --bin apcore-a2a
+
+    FROM debian:bookworm-slim
+    WORKDIR /app
+    COPY --from=build /app/target/release/apcore-a2a /usr/local/bin/apcore-a2a
+
+    # Rust folds host+port into --url; there is no --host/--log-level CLI flag.
+    ENV EXTENSIONS_DIR=/app/extensions
+
+    EXPOSE 8000
+
+    CMD apcore-a2a --extensions-dir "${EXTENSIONS_DIR}" --port 8000
+    ```
 
 **docker-compose.yml:**
 

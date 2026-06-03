@@ -21,26 +21,42 @@ Webhook-based async delivery of task state changes. Clients register a webhook U
 
 ## Component: `PushNotificationManager` — `server/push.py`
 
-```python
-class PushNotificationManager:
-    _MAX_RETRIES = 3
-    _RETRY_DELAYS = [1.0, 2.0, 4.0]  # seconds, exponential backoff
+=== "Python"
 
-    def __init__(self, store: TaskStore) -> None:
-        self._store = store
-        self._http_client = httpx.AsyncClient(timeout=10.0)
+    ```python
+    class PushNotificationManager:
+        _MAX_RETRIES = 3
+        _RETRY_DELAYS = [1.0, 2.0, 4.0]  # seconds, exponential backoff
 
-    # JSON-RPC handlers
-    async def set_config(self, params: dict) -> dict: ...
-    async def get_config(self, params: dict) -> dict: ...
-    async def delete_config(self, params: dict) -> dict: ...
+        def __init__(self, store: TaskStore) -> None:
+            self._store = store
+            self._http_client = httpx.AsyncClient(timeout=10.0)
 
-    # Called by TaskManager on state transitions
-    async def notify(self, task_id: str, event: dict) -> None: ...
+        # JSON-RPC handlers
+        async def set_config(self, params: dict) -> dict: ...
+        async def get_config(self, params: dict) -> dict: ...
+        async def delete_config(self, params: dict) -> dict: ...
 
-    async def close(self) -> None:
-        """Close HTTP client."""
-```
+        # Called by TaskManager on state transitions
+        async def notify(self, task_id: str, event: dict) -> None: ...
+
+        async def close(self) -> None:
+            """Close HTTP client."""
+    ```
+
+=== "TypeScript"
+
+    > No equivalent component — the TypeScript SDK exposes only a config flag
+    > (`serve(registry, { pushNotifications: true })`) and delegates webhook
+    > delivery and retry to `@a2a-js/sdk`.
+
+=== "Rust"
+
+    > No equivalent component — the Rust crate handles push inline in
+    > `src/server/handlers.rs`: the `tasks/pushNotificationConfig/{set,get,delete}`
+    > JSON-RPC routes store configs in `AppState.push_configs`, and `notify_push()`
+    > fires the webhook after terminal status. There is no `serve` flag; push is
+    > always available.
 
 ## `set_config()` — Register Webhook
 

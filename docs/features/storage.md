@@ -24,46 +24,75 @@ Pluggable task persistence layer. Defines the `TaskStore` protocol and provides 
 
 ### 1. `TaskStore` Protocol — `storage/protocol.py`
 
-```python
-from typing import Protocol, runtime_checkable
+=== "Python"
 
-@runtime_checkable
-class TaskStore(Protocol):
-    async def save(self, task: dict) -> None:
-        """Persist task. Overwrites if task with same id exists."""
-        ...
+    ```python
+    from typing import Protocol, runtime_checkable
 
-    async def get(self, task_id: str) -> dict | None:
-        """Return task by ID, or None if not found."""
-        ...
+    @runtime_checkable
+    class TaskStore(Protocol):
+        async def save(self, task: dict) -> None:
+            """Persist task. Overwrites if task with same id exists."""
+            ...
 
-    async def list(
-        self,
-        context_id: str | None = None,
-        cursor: str | None = None,
-        limit: int = 50,
-    ) -> dict:
-        """List tasks. Returns {"tasks": [...], "nextCursor": str | None}.
-        Filter by context_id if provided. Clamp limit to [1, 200].
-        """
-        ...
+        async def get(self, task_id: str) -> dict | None:
+            """Return task by ID, or None if not found."""
+            ...
 
-    async def delete(self, task_id: str) -> bool:
-        """Delete task. Returns True if existed, False if not found."""
-        ...
+        async def list(
+            self,
+            context_id: str | None = None,
+            cursor: str | None = None,
+            limit: int = 50,
+        ) -> dict:
+            """List tasks. Returns {"tasks": [...], "nextCursor": str | None}.
+            Filter by context_id if provided. Clamp limit to [1, 200].
+            """
+            ...
 
-    async def save_push_config(self, task_id: str, config: dict) -> None:
-        """Persist push notification config for a task."""
-        ...
+        async def delete(self, task_id: str) -> bool:
+            """Delete task. Returns True if existed, False if not found."""
+            ...
 
-    async def get_push_config(self, task_id: str) -> dict | None:
-        """Return push config for task, or None."""
-        ...
+        async def save_push_config(self, task_id: str, config: dict) -> None:
+            """Persist push notification config for a task."""
+            ...
 
-    async def delete_push_config(self, task_id: str) -> bool:
-        """Delete push config. Returns True if existed."""
-        ...
-```
+        async def get_push_config(self, task_id: str) -> dict | None:
+            """Return push config for task, or None."""
+            ...
+
+        async def delete_push_config(self, task_id: str) -> bool:
+            """Delete push config. Returns True if existed."""
+            ...
+    ```
+
+=== "TypeScript"
+
+    ```typescript
+    // Re-exported from @a2a-js/sdk/server (see src/storage/index.ts).
+    export interface TaskStore {
+      save(taskId: string, task: TaskData, context?: unknown): Promise<void>;
+      load(taskId: string, context?: unknown): Promise<TaskData | null>;
+      delete(taskId: string, context?: unknown): Promise<void>;
+      list(...args: unknown[]): Promise<TaskData[]>;
+    }
+    ```
+
+=== "Rust"
+
+    ```rust
+    use async_trait::async_trait;
+    use serde_json::Value;
+
+    #[async_trait]
+    pub trait TaskStore: Send + Sync {
+        async fn save(&self, task_id: &str, task: Value) -> Result<(), String>;
+        async fn get(&self, task_id: &str) -> Result<Option<Value>, String>;
+        async fn delete(&self, task_id: &str) -> Result<(), String>;
+        async fn list(&self) -> Result<Vec<Value>, String>;
+    }
+    ```
 
 **Runtime checkable**: `isinstance(store, TaskStore)` must work for duck-typed custom implementations.
 
@@ -73,14 +102,35 @@ class TaskStore(Protocol):
 
 Default implementation using `dict` + `asyncio.Lock`.
 
-```python
-class InMemoryTaskStore:
-    def __init__(self, *, max_tasks: int = 10_000) -> None:
-        self._tasks: dict[str, dict] = {}
-        self._push_configs: dict[str, dict] = {}
-        self._lock = asyncio.Lock()
-        self._max_tasks = max_tasks
-```
+=== "Python"
+
+    ```python
+    class InMemoryTaskStore:
+        def __init__(self, *, max_tasks: int = 10_000) -> None:
+            self._tasks: dict[str, dict] = {}
+            self._push_configs: dict[str, dict] = {}
+            self._lock = asyncio.Lock()
+            self._max_tasks = max_tasks
+    ```
+
+=== "TypeScript"
+
+    ```typescript
+    import { InMemoryTaskStore } from "apcore-a2a";
+
+    // Re-exported from @a2a-js/sdk/server; the SDK manages its own
+    // internal task map. Construct with no arguments.
+    const taskStore = new InMemoryTaskStore();
+    ```
+
+=== "Rust"
+
+    ```rust
+    use apcore_a2a::InMemoryTaskStore;
+
+    // Backed by a Mutex<HashMap<String, Value>>; construct with no arguments.
+    let task_store = InMemoryTaskStore::new();
+    ```
 
 **Behavior:**
 
@@ -138,12 +188,31 @@ All tasks stored as plain Python dicts (JSON-serializable):
 The storage module delegates entirely to the `a2a-sdk` library. The `storage/__init__.py` re-exports
 `TaskStore` and `InMemoryTaskStore` from `a2a.server.tasks`:
 
-```python
-# src/apcore_a2a/storage/__init__.py
-from a2a.server.tasks import TaskStore, InMemoryTaskStore
+=== "Python"
 
-__all__ = ["TaskStore", "InMemoryTaskStore"]
-```
+    ```python
+    # src/apcore_a2a/storage/__init__.py
+    from a2a.server.tasks import TaskStore, InMemoryTaskStore
+
+    __all__ = ["TaskStore", "InMemoryTaskStore"]
+    ```
+
+=== "TypeScript"
+
+    ```typescript
+    // src/storage/index.ts
+    export { InMemoryTaskStore } from "@a2a-js/sdk/server";
+    export type { TaskStore } from "@a2a-js/sdk/server";
+    ```
+
+=== "Rust"
+
+    ```rust
+    // src/storage/mod.rs
+    pub use self::memory::InMemoryTaskStore;
+
+    // TaskStore is defined in this crate (see trait above).
+    ```
 
 The a2a-sdk `TaskStore` interface exposes `save`, `get`, and `delete` only. Push notification config
 and context storage are handled internally by the SDK. The custom `protocol.py`, `memory.py`, `list()`

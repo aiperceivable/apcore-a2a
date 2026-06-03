@@ -164,9 +164,22 @@ Use the `A2AClient` to interact with any A2A-compliant agent:
 === "Rust"
     ```rust
     use apcore_a2a::A2AClient;
+    use serde_json::json;
 
     let client = A2AClient::new("http://remote-agent:8000");
-    let task = client.send_message("general.chat", "Hello, how can you help?").await?;
+
+    // `metadata.skillId` selects the module; structured inputs go in a `data` part.
+    let task = client
+        .send_message(
+            json!({
+                "messageId": "m1",
+                "role": "ROLE_USER",
+                "parts": [{ "text": "Hello, how can you help?" }]
+            }),
+            Some(json!({ "skillId": "general.chat" })),
+            None, // optional contextId
+        )
+        .await?;
     println!("Task status: {}", task["status"]["state"]);
     ```
 

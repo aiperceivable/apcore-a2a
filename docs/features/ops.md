@@ -29,16 +29,44 @@ Operational endpoints and dynamic module registration. Three sub-features:
 
 ### Response — Healthy
 
-```python
-async def handle_health(self, request: Request) -> JSONResponse:
-    uptime = time.monotonic() - self._started_at
-    return JSONResponse({
-        "status": "healthy",
-        "module_count": len(self._registry.list()),
-        "uptime_seconds": uptime,  # float (seconds since start)
-        "version": self._version,
-    })
-```
+=== "Python"
+
+    ```python
+    async def handle_health(self, request: Request) -> JSONResponse:
+        uptime = time.monotonic() - self._started_at
+        return JSONResponse({
+            "status": "healthy",
+            "module_count": len(self._registry.list()),
+            "uptime_seconds": uptime,  # float (seconds since start)
+            "version": self._version,
+        })
+    ```
+
+=== "TypeScript"
+
+    ```typescript
+    // src/server/factory.ts — GET /health
+    // → { status, uptimeSeconds, moduleCount, version }
+    // 503 with { status: "unhealthy", reason } when the task store is unreachable.
+    app.get("/health", (_req, res) => {
+      res.json({
+        status: "healthy",
+        moduleCount: registry.list().length,
+        uptimeSeconds: (Date.now() - startedAt) / 1000,
+        version: VERSION,
+      });
+    });
+    ```
+
+=== "Rust"
+
+    ```rust
+    // src/server/factory.rs — GET /health is always public.
+    // Returns { "status": "healthy" } (503 with a reason when unhealthy).
+    async fn handle_health() -> Json<Value> {
+        Json(json!({ "status": "healthy" }))
+    }
+    ```
 
 HTTP 200:
 ```json
@@ -112,16 +140,37 @@ HTTP 404 (when `metrics=False`, the default):
 
 Task state counters are maintained in a `_MetricsState` dataclass within `server/factory.py`, updated via `on_state_change` callback from `ApCoreAgentExecutor`:
 
-```python
-@dataclass
-class _MetricsState:
-    active: int = 0
-    completed: int = 0
-    failed: int = 0
-    canceled: int = 0
-    input_required: int = 0
-    started_at: float = field(default_factory=time.monotonic)
-```
+=== "Python"
+
+    ```python
+    @dataclass
+    class _MetricsState:
+        active: int = 0
+        completed: int = 0
+        failed: int = 0
+        canceled: int = 0
+        input_required: int = 0
+        started_at: float = field(default_factory=time.monotonic)
+    ```
+
+=== "TypeScript"
+
+    ```typescript
+    // src/server/factory.ts — counters updated via the onStateChange callback
+    // from ApCoreAgentExecutor; served by GET /metrics when metrics: true.
+    interface MetricsState {
+      active: number;
+      completed: number;
+      failed: number;
+      canceled: number;
+      inputRequired: number;
+      startedAt: number;
+    }
+    ```
+
+=== "Rust"
+
+    > Not applicable — the Rust crate does not serve a `/metrics` endpoint (the `metrics` flag is inert), so no metrics counters are maintained.
 
 State change callbacks update counters:
 - `→ working` : `active += 1`
@@ -130,16 +179,30 @@ State change callbacks update counters:
 - `→ canceled` : `active -= 1`, `canceled += 1`
 - `→ input_required`: `input_required += 1`
 
-### `serve()` kwarg
+### `serve()` option
 
-```python
-def serve(
-    registry_or_executor: object,
-    *,
-    metrics: bool = False,   # Enable GET /metrics endpoint
-    ...
-) -> None: ...
-```
+=== "Python"
+
+    ```python
+    def serve(
+        registry_or_executor: object,
+        *,
+        metrics: bool = False,   # Enable GET /metrics endpoint
+        ...
+    ) -> None: ...
+    ```
+
+=== "TypeScript"
+
+    ```typescript
+    import { serve } from "apcore-a2a";
+    // metrics: true enables the GET /metrics endpoint (default: false)
+    serve(registry, { metrics: true, port: 8000 });
+    ```
+
+=== "Rust"
+
+    > Not applicable — `APCoreA2AConfig.metrics` exists for parity but is inert; the Rust crate does not serve a `/metrics` endpoint.
 
 ---
 
@@ -151,30 +214,73 @@ def serve(
 
 ### API
 
-```python
-class A2AServerFactory:
-    def register_module(self, module_id: str, descriptor: object) -> None:
-        """Register a new module at runtime.
+=== "Python"
 
-        Steps:
-        1. Add module to registry via registry.register(module_id, descriptor).
-        2. Invalidate cached Agent Card: agent_card_builder.invalidate_cache() (card rebuilt lazily on next request).
-        3. Log INFO: "Dynamically registered module: {module_id}".
+    ```python
+    class A2AServerFactory:
+        def register_module(self, module_id: str, descriptor: object) -> None:
+            """Register a new module at runtime.
 
-        Raises:
-            ValueError: If module_id is already registered.
-            TypeError: If descriptor is not a valid ModuleDescriptor.
-        """
-```
+            Steps:
+            1. Add module to registry via registry.register(module_id, descriptor).
+            2. Invalidate cached Agent Card: agent_card_builder.invalidate_cache() (card rebuilt lazily on next request).
+            3. Log INFO: "Dynamically registered module: {module_id}".
+
+            Raises:
+                ValueError: If module_id is already registered.
+                TypeError: If descriptor is not a valid ModuleDescriptor.
+            """
+    ```
+
+=== "TypeScript"
+
+    ```typescript
+    // src/server/factory.ts — registers a module at runtime and
+    // invalidates the cached Agent Card so it is rebuilt on the next request.
+    class A2AServerFactory {
+      registerModule(moduleId: string, descriptor: unknown): void;
+    }
+    ```
+
+=== "Rust"
+
+    > No runtime `register_module` on the factory. Register modules on the `Registry`
+    > before serving, then pass it via `BackendSource::Registry(...)`:
+
+    ```rust
+    let registry = Registry::new();
+    registry.register_module("greeting.hello", Box::new(Hello))?;
+    serve(BackendSource::Registry(Arc::new(registry)), APCoreA2AConfig::default()).await?;
+    ```
 
 ### `AgentCardBuilder.invalidate_cache()`
 
-```python
-def invalidate_cache(self) -> None:
-    """Invalidate cached Agent Cards. Called on module registration changes."""
-    self._cached_card = None
-    self._cached_extended_card = None
-```
+=== "Python"
+
+    ```python
+    def invalidate_cache(self) -> None:
+        """Invalidate cached Agent Cards. Called on module registration changes."""
+        self._cached_card = None
+        self._cached_extended_card = None
+    ```
+
+=== "TypeScript"
+
+    ```typescript
+    // src/adapters/agent-card.ts — clears the cached card so it is rebuilt lazily.
+    class AgentCardBuilder {
+      invalidateCache(): void;
+    }
+    ```
+
+=== "Rust"
+
+    ```rust
+    // src/adapters/agent_card.rs — clears the cached card so it is rebuilt lazily.
+    impl AgentCardBuilder {
+        pub fn invalidate_cache(&self) { /* ... */ }
+    }
+    ```
 
 After invalidation, the next `GET /.well-known/agent-card.json` call triggers a full rebuild from the registry.
 
@@ -201,12 +307,32 @@ The other ops features (health, dynamic registration) are always available when 
 
 Ops features are implemented across existing files:
 
-```
-src/apcore_a2a/server/
-    factory.py      # _build_health_handler(), _build_metrics_handler(), register_module()
-src/apcore_a2a/adapters/
-    agent_card.py   # invalidate_cache()
-```
+=== "Python"
+
+    ```
+    src/apcore_a2a/server/
+        factory.py      # _build_health_handler(), _build_metrics_handler(), register_module()
+    src/apcore_a2a/adapters/
+        agent_card.py   # invalidate_cache()
+    ```
+
+=== "TypeScript"
+
+    ```
+    src/server/
+        factory.ts      # GET /health, GET /metrics, registerModule()
+    src/adapters/
+        agent-card.ts   # invalidateCache()
+    ```
+
+=== "Rust"
+
+    ```
+    src/server/
+        factory.rs      # GET /health (no /metrics; metrics flag inert)
+    src/adapters/
+        agent_card.rs   # invalidate_cache()
+    ```
 
 No new files required.
 

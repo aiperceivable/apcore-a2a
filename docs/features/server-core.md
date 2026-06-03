@@ -27,35 +27,88 @@ Core server machinery: factory that wires everything together, router that dispa
 
 Creates the full ASGI application with all routes configured.
 
-```python
-class A2AServerFactory:
-    def __init__(self) -> None:
-        self._skill_mapper = SkillMapper()
-        self._schema_converter = SchemaConverter()
-        self._agent_card_builder = AgentCardBuilder(self._skill_mapper)
-        self._error_mapper = ErrorMapper()
-        self._part_converter = PartConverter(self._schema_converter)
+=== "Python"
 
-    def create(
-        self,
-        registry: object,
-        executor: object,
-        *,
-        name: str,
-        description: str,
-        version: str,
-        url: str,
-        task_store: TaskStore,
-        auth: Authenticator | None = None,
-        push_notifications: bool = False,
-        cancel_on_disconnect: bool = True,
-        execution_timeout: int = 300,
-        cors_origins: list[str] | None = None,
-        explorer: bool = False,
-        explorer_prefix: str = "/explorer",
-    ) -> tuple[Starlette, dict]:
-        """Build ASGI app and Agent Card. Returns (app, agent_card)."""
-```
+    ```python
+    class A2AServerFactory:
+        def __init__(self) -> None:
+            self._skill_mapper = SkillMapper()
+            self._schema_converter = SchemaConverter()
+            self._agent_card_builder = AgentCardBuilder(self._skill_mapper)
+            self._error_mapper = ErrorMapper()
+            self._part_converter = PartConverter(self._schema_converter)
+
+        def create(
+            self,
+            registry: object,
+            executor: object,
+            *,
+            name: str,
+            description: str,
+            version: str,
+            url: str,
+            task_store: TaskStore,
+            auth: Authenticator | None = None,
+            push_notifications: bool = False,
+            cancel_on_disconnect: bool = True,
+            execution_timeout: int = 300,
+            cors_origins: list[str] | None = None,
+            explorer: bool = False,
+            explorer_prefix: str = "/explorer",
+        ) -> tuple[Starlette, dict]:
+            """Build ASGI app and Agent Card. Returns (app, agent_card)."""
+    ```
+
+=== "TypeScript"
+
+    ```typescript
+    class A2AServerFactory {
+      create(
+        registry: unknown,
+        executor: { callAsync(moduleId: string, inputs?: unknown, context?: unknown): Promise<unknown> },
+        opts: A2AServerCreateOptions,
+      ): { app: Express; agentCard: AgentCard }
+      registerModule(moduleId: string, descriptor: unknown): void
+    }
+
+    interface A2AServerCreateOptions {
+      name: string;
+      description: string;
+      version: string;
+      url: string;
+      taskStore?: TaskStore;
+      auth?: Authenticator;
+      executionTimeout?: number;
+      corsOrigins?: string[];
+      pushNotifications?: boolean;
+      explorer?: boolean;
+      explorerPrefix?: string;
+      metrics?: boolean;
+      sysModules?: boolean;
+    }
+    ```
+
+=== "Rust"
+
+    ```rust
+    impl A2AServerFactory {
+        pub fn new() -> Self;  // registers A2A namespace + error formatter
+
+        pub fn create(
+            &self,
+            registry: &Registry,
+            executor: Arc<ApCoreAgentExecutor>,
+            task_store: Arc<dyn TaskStore>,
+            name: &str,
+            description: &str,
+            version: &str,
+            url: &str,
+            auth: Option<Arc<dyn Authenticator>>,
+            explorer: bool,
+            explorer_prefix: &str,
+        ) -> (Router, AgentCard);
+    }
+    ```
 
 **Creation sequence:**
 1. Build skills via `_skill_mapper` from all registry modules.
@@ -310,12 +363,31 @@ Auth exempt paths include `{"/.well-known/agent.json", "/.well-known/agent-card.
 
 ## File Structure
 
-```
-src/apcore_a2a/server/
-    __init__.py         # exports: A2AServerFactory, ApCoreAgentExecutor
-    factory.py          # A2AServerFactory (orchestrates all components, health/metrics handlers)
-    executor.py         # ApCoreAgentExecutor (implements a2a-sdk AgentExecutor)
-```
+=== "Python"
+
+    ```
+    src/apcore_a2a/server/
+        __init__.py         # exports: A2AServerFactory, ApCoreAgentExecutor
+        factory.py          # A2AServerFactory (orchestrates all components, health/metrics handlers)
+        executor.py         # ApCoreAgentExecutor (implements a2a-sdk AgentExecutor)
+    ```
+
+=== "TypeScript"
+
+    ```
+    src/server/
+        factory.ts          # A2AServerFactory (orchestrates components, health/metrics handlers)
+        executor.ts         # ApCoreAgentExecutor (implements @a2a-js/sdk/server AgentExecutor)
+    ```
+
+=== "Rust"
+
+    ```
+    src/server/
+        factory.rs          # A2AServerFactory (orchestrates components, health handler)
+        executor.rs         # ApCoreAgentExecutor (call / stream_channel)
+        handlers.rs         # axum JSON-RPC dispatch, SSE, push-notification config
+    ```
 
 ## Key Invariants
 
