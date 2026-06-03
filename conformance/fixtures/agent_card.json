@@ -1,0 +1,69 @@
+{
+  "description": "Agent Card builder-level wire-shape parity (Algorithm A-CARD). The runner builds an AgentCard via AgentCardBuilder.build(registry, name, description, version, url, capabilities, security_schemes) where `security_schemes` is the FLAT descriptor returned by JWTAuthenticator.security_schemes(), serializes to the A2A 1.0 JSON wire form (camelCase), and partial-matches expected_card. Locks the proto3 securitySchemes oneof shape and supportedInterfaces (no top-level url). NOTE: agent name/version fallback and capabilities.{streaming,pushNotifications} computation live in the serve() layer (not the builder) and are covered by per-SDK TC-AGC unit tests, not by this fixture.",
+  "contract_version": "1.0",
+  "sub_algorithm": "A-CARD",
+  "test_cases": [
+    {
+      "id": "supported_interfaces_no_top_level_url",
+      "input": {
+        "name": "my-agent",
+        "description": "Test agent",
+        "version": "1.2.3",
+        "url": "http://localhost:8000",
+        "modules": [
+          { "module_id": "math.add", "description": "Adds two numbers" },
+          { "module_id": "math.multiply", "description": "Multiplies two numbers" }
+        ]
+      },
+      "expected_card": {
+        "name": "my-agent",
+        "version": "1.2.3",
+        "supportedInterfaces": [
+          { "url": "http://localhost:8000", "protocolBinding": "JSONRPC", "protocolVersion": "1.0" }
+        ]
+      },
+      "expected_card_absent_keys": ["url"],
+      "expected_skill_count": 2,
+      "expected_security_requirements_empty": true
+    },
+    {
+      "id": "security_schemes_oneof_shape",
+      "description": "The flat {type:http,scheme:bearer,bearerFormat:JWT} descriptor is transformed into the A2A 1.0 proto3 oneof shape on the wire (scheme type = the oneof key httpAuthSecurityScheme, NOT a `type` field).",
+      "input": {
+        "name": "secure-agent",
+        "description": "d",
+        "version": "1.0.0",
+        "url": "http://localhost:8000",
+        "modules": [{ "module_id": "math.add", "description": "Adds" }],
+        "security_schemes_input": {
+          "bearerAuth": { "type": "http", "scheme": "bearer", "bearerFormat": "JWT" }
+        }
+      },
+      "expected_card": {
+        "securitySchemes": {
+          "bearerAuth": { "httpAuthSecurityScheme": { "scheme": "bearer", "bearerFormat": "JWT" } }
+        }
+      },
+      "expected_security_requirements_empty": true
+    },
+    {
+      "id": "no_auth_empty_security",
+      "input": {
+        "name": "open-agent",
+        "description": "d",
+        "version": "1.0.0",
+        "url": "http://localhost:8000",
+        "modules": [{ "module_id": "math.add", "description": "Adds" }]
+      },
+      "expected_security_schemes_empty": true,
+      "expected_security_requirements_empty": true
+    }
+  ],
+  "notes": {
+    "known_divergences": [
+      "auth.md once wrongly showed securityRequirements as [{\"bearerAuth\":[]}]; the locked value is always empty. On the JSON wire (proto3) an empty repeated/map field is omitted, so the runner treats an absent securitySchemes/securityRequirements as empty rather than asserting a literal [] / {}.",
+      "TS/Rust previously emitted the flat security-scheme descriptor on the wire; fixed via toA2ASecurityScheme / to_a2a_security_schemes so all three now emit the oneof shape asserted here.",
+      "provider may be null or an object depending on configuration; not asserted here."
+    ]
+  }
+}

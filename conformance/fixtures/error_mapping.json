@@ -1,0 +1,47 @@
+{
+  "description": "apcore exception -> JSON-RPC error parity (Algorithm A-ERR). The runner reconstructs the apcore exception from `input`, calls ErrorMapper.to_jsonrpc_error, asserts the code, and asserts message contains/excludes substrings. Codes per docs/spec/srs.md FR-ERR-* and the README error-code table.",
+  "contract_version": "1.0",
+  "sub_algorithm": "A-ERR",
+  "error_cases": [
+    {
+      "id": "module_not_found",
+      "input": { "exception": "ModuleNotFoundError", "module": "unknown.module" },
+      "expected_error_code": -32601
+    },
+    {
+      "id": "schema_validation_error_names_field",
+      "input": { "exception": "SchemaValidationError", "errors": { "width": "must be integer" } },
+      "expected_error_code": -32602,
+      "expected_error_message": ["width"]
+    },
+    {
+      "id": "acl_denied_sanitized",
+      "description": "ACLDeniedError -> -32001 (TaskNotFound) with caller and module suppressed (NFR-SEC-003).",
+      "input": { "exception": "ACLDeniedError", "caller": "service-account-db-writer", "module": "admin.users.delete" },
+      "expected_error_code": -32001,
+      "expected_message_excludes": ["service-account-db-writer", "admin.users.delete"]
+    },
+    {
+      "id": "module_execute_error_generic_message",
+      "description": "ModuleExecuteError -> -32603 with the fixed message; original text never surfaced.",
+      "input": { "exception": "ModuleExecuteError", "message": "Database connection failed at 192.168.1.1" },
+      "expected_error_code": -32603,
+      "expected_error_message": ["Internal server error"],
+      "expected_message_excludes": ["192.168.1.1", "Database connection failed"]
+    },
+    {
+      "id": "unknown_exception_generic",
+      "description": "An unrecognized exception -> -32603 with the same fixed generic message as ModuleExecuteError, and no raw detail.",
+      "input": { "exception": "RuntimeError", "message": "Database password: P@ssw0rd123" },
+      "expected_error_code": -32603,
+      "expected_error_message": ["Internal server error"],
+      "expected_message_excludes": ["P@ssw0rd123", "password"]
+    }
+  ],
+  "notes": {
+    "known_divergences": [
+      "Message wording reconciled 2026-06-02: both ModuleExecuteError and any unrecognized exception emit the fixed string \"Internal server error\" (-32603). All three SDKs already produce this via their catch-all arm (no explicit MODULE_EXECUTE_ERROR branch); docs (srs FR-ERR-008, prd, tech-design) were aligned to match. \"Internal error\" remains only as the JSON-RPC standard NAME of code -32603, never as the emitted message.",
+      "ModuleTimeoutError maps to message \"Execution timeout\" (-32603) standalone, and to a FAILED task on the streaming/server path; the streaming form is covered by streaming_events.json."
+    ]
+  }
+}

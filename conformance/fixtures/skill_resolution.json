@@ -1,0 +1,97 @@
+{
+  "description": "Skill resolution and parse-failure parity (Algorithm A-SKILL). Locks the 2026-06-02 decision: missing/invalid skillId and unparseable parts yield a FAILED task (a Task exists), NOT a JSON-RPC -32602. The runner drives the server/executor with `params` (a message/send payload), collects the emitted events, and asserts the task reaches TASK_STATE_FAILED with the given status message. A genuinely missing `message` envelope is protocol-level (no task) and stays a JSON-RPC error (error_cases, dispatch layer).",
+  "contract_version": "1.0",
+  "sub_algorithm": "A-SKILL",
+  "test_cases": [
+    {
+      "id": "missing_skill_id_yields_failed_task",
+      "description": "message has parts but no metadata.skillId -> FAILED task, not -32602.",
+      "params": {
+        "message": {
+          "role": "ROLE_USER",
+          "messageId": "msg-001",
+          "parts": [
+            {
+              "data": {
+                "a": 1
+              }
+            }
+          ]
+        },
+        "metadata": {}
+      },
+      "expected_outcome": "failed_task",
+      "expected_task_state": "TASK_STATE_FAILED",
+      "expected_status_message": [
+        "skillId"
+      ]
+    },
+    {
+      "id": "unknown_skill_id_yields_failed_task",
+      "params": {
+        "message": {
+          "role": "ROLE_USER",
+          "messageId": "msg-002",
+          "parts": [
+            {
+              "data": {
+                "a": 1
+              }
+            }
+          ]
+        },
+        "metadata": {
+          "skillId": "does.not.exist"
+        }
+      },
+      "expected_outcome": "failed_task",
+      "expected_task_state": "TASK_STATE_FAILED",
+      "expected_status_message": [
+        "Skill not found"
+      ]
+    },
+    {
+      "id": "unparseable_textpart_yields_failed_task",
+      "description": "TextPart with invalid JSON for a module whose input schema is object-typed -> FAILED task (the converter-level error surfaces as a failed Task once a Task exists). Requires the target skill to be registered with an object input schema.",
+      "params": {
+        "message": {
+          "role": "ROLE_USER",
+          "messageId": "msg-003",
+          "parts": [
+            {
+              "text": "not json {"
+            }
+          ]
+        },
+        "metadata": {
+          "skillId": "math.add"
+        }
+      },
+      "skill": {
+        "module_id": "math.add",
+        "input_schema": {
+          "type": "object"
+        }
+      },
+      "expected_outcome": "failed_task",
+      "expected_task_state": "TASK_STATE_FAILED",
+      "expected_status_message": []
+    }
+  ],
+  "error_cases": [
+    {
+      "id": "missing_message_envelope_is_rpc_error",
+      "description": "No `message` key at all -> protocol-level JSON-RPC error, no task created. This is dispatch-layer; runners that drive the executor directly (rather than the JSON-RPC server) skip this case and rely on per-SDK server tests.",
+      "params": {},
+      "expected_outcome": "rpc_error",
+      "expected_error_code": -32602
+    }
+  ],
+  "notes": {
+    "known_divergences": [
+      "Event emission lives in the executor (Python/TS: ApCoreAgentExecutor) but in the handler for Rust (handlers.rs); both produce the same observable A2A events. The initial event is a `task` carrying TASK_STATE_SUBMITTED, followed by a `statusUpdate` with TASK_STATE_FAILED — there is no separate SUBMITTED statusUpdate event.",
+      "Failed-status messages for missing/unknown skill are exact and cross-language ('Missing required parameter: metadata.skillId', 'Skill not found: <id>'). The unparseable-text-part FAILED message is SDK-specific and therefore NOT asserted here: Python/TS surface the converter message 'TextPart text is not valid JSON' (locked at the converter level in part_conversion.json), while Rust passes the raw text to the module and surfaces the sanitized 'Internal server error'. The cross-language invariant asserted for that case is only that the task FAILS.",
+      "Messages live at status.message.parts[0].text (a text Part). The request message role is the wire enum 'ROLE_USER' and skillId lives in params.metadata (Rust also accepts message.metadata)."
+    ]
+  }
+}

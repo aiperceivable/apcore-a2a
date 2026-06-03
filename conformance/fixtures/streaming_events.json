@@ -1,0 +1,108 @@
+{
+  "description": "Streaming event-sequence parity (Algorithm A-STREAM). Locks the A2A 1.0 streaming INVARIANTS that hold across all SDKs: the stream starts in TASK_STATE_SUBMITTED, emits at least one artifactUpdate, ends a successful stream with a terminal lastChunk marker (append=true, empty parts, artifactId art-{taskId}) followed by TASK_STATE_COMPLETED, and on error goes straight to TASK_STATE_FAILED with NO marker. The runner drives a streaming request and asserts these properties (not an exact positional sequence — see notes for the head-of-stream representation divergence).",
+  "contract_version": "1.0",
+  "sub_algorithm": "A-STREAM",
+  "test_cases": [
+    {
+      "id": "stream_success_marker_then_completed",
+      "description": "A successful stream: >=1 artifactUpdate, then a terminal lastChunk marker (empty parts), then COMPLETED. module_chunks is consumed by the Python/TS stub executor (which yields exactly these); Rust drives its echo module (>=1 chunk).",
+      "params": {
+        "message": {
+          "role": "ROLE_USER",
+          "messageId": "msg-stream-001",
+          "parts": [
+            {
+              "data": {
+                "count": 3
+              }
+            }
+          ]
+        },
+        "metadata": {
+          "skillId": "data.stream"
+        }
+      },
+      "module_chunks": [
+        {
+          "n": 1
+        },
+        {
+          "n": 2
+        },
+        {
+          "n": 3
+        }
+      ],
+      "expected_start_state": "TASK_STATE_SUBMITTED",
+      "expected_min_artifact_updates": 1,
+      "expected_terminal_marker": true,
+      "expected_final_state": "TASK_STATE_COMPLETED"
+    },
+    {
+      "id": "error_midstream_skips_marker",
+      "description": "If the module errors, the terminal lastChunk marker is skipped and the stream goes straight to FAILED with the fixed sanitized message.",
+      "params": {
+        "message": {
+          "role": "ROLE_USER",
+          "messageId": "msg-stream-002",
+          "parts": [
+            {
+              "data": {}
+            }
+          ]
+        },
+        "metadata": {
+          "skillId": "fail.module"
+        }
+      },
+      "module_error": {
+        "exception": "ModuleExecuteError",
+        "message": "boom at 10.0.0.5"
+      },
+      "expected_start_state": "TASK_STATE_SUBMITTED",
+      "expected_final_state": "TASK_STATE_FAILED",
+      "expected_terminal_marker": false,
+      "expected_status_message": [
+        "Internal server error"
+      ],
+      "expected_status_message_excludes": [
+        "10.0.0.5",
+        "boom"
+      ]
+    },
+    {
+      "id": "timeout_midstream_failed",
+      "description": "A module timeout surfaces as FAILED with the executor-path timeout message. (Optional for SDKs that cannot cheaply simulate a timeout in-process; such runners may skip this case and rely on per-SDK tests.)",
+      "params": {
+        "message": {
+          "role": "ROLE_USER",
+          "messageId": "msg-stream-003",
+          "parts": [
+            {
+              "data": {}
+            }
+          ]
+        },
+        "metadata": {
+          "skillId": "slow.module"
+        }
+      },
+      "module_error": {
+        "exception": "ModuleTimeoutError"
+      },
+      "optional": true,
+      "expected_final_state": "TASK_STATE_FAILED",
+      "expected_status_message": [
+        "Execution timed out"
+      ]
+    }
+  ],
+  "notes": {
+    "known_divergences": [
+      "Head-of-stream representation differs and is therefore NOT asserted positionally: Python/TS emit an initial `task` event carrying TASK_STATE_SUBMITTED (no separate SUBMITTED statusUpdate), while Rust emits a `statusUpdate` with TASK_STATE_SUBMITTED. The shared invariant asserted is that the stream STARTS in SUBMITTED (in whichever event carries it).",
+      "Artifact count differs: the Python/TS stub yields module_chunks (3); the Rust runner streams its echo module (1). The shared invariant is >=1 artifactUpdate plus the terminal lastChunk marker (empty parts, artifactId art-{taskId}).",
+      "Stream termination is signaled by the terminal TASK_STATE, not a `final` flag (removed in A2A 1.0).",
+      "The executor-path FAILED timeout message is 'Execution timed out' (the ErrorMapper JSON-RPC form 'Execution timeout' is a different, non-streaming surface covered by error_mapping.json)."
+    ]
+  }
+}

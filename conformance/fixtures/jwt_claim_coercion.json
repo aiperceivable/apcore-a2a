@@ -1,0 +1,100 @@
+{
+  "description": "JWT claim -> Identity coercion parity (Algorithm A-AUTH). Each case supplies a JWT payload; the runner signs it with `secret` (HS256), calls authenticate(), and asserts the derived Identity (or a None/reject). Coercion is the Rust-strict canonical rule documented in docs/features/auth.md.",
+  "contract_version": "1.0",
+  "sub_algorithm": "A-AUTH",
+  "secret": "test-secret-key-abc123-padding-to-32-bytes-min",
+  "algorithm": "HS256",
+  "test_cases": [
+    {
+      "id": "string_claims_passthrough",
+      "claims": { "sub": "user-42", "type": "user", "roles": ["admin", "viewer"] },
+      "expected_identity": { "id": "user-42", "type": "user", "roles": ["admin", "viewer"] }
+    },
+    {
+      "id": "numeric_sub_coerced_to_string",
+      "description": "A scalar numeric sub is coerced (PyJWT verify_sub disabled so it reaches coercion).",
+      "claims": { "sub": 12345, "type": "user" },
+      "expected_identity": { "id": "12345", "type": "user", "roles": [] }
+    },
+    {
+      "id": "boolean_role_coerced_lowercase",
+      "claims": { "sub": "u1", "roles": [true, false, "ops"] },
+      "expected_identity": { "id": "u1", "type": "user", "roles": ["true", "false", "ops"] }
+    },
+    {
+      "id": "type_absent_defaults_user",
+      "claims": { "sub": "u1" },
+      "expected_identity": { "id": "u1", "type": "user", "roles": [] }
+    },
+    {
+      "id": "type_null_defaults_user",
+      "claims": { "sub": "u1", "type": null },
+      "expected_identity": { "id": "u1", "type": "user", "roles": [] }
+    },
+    {
+      "id": "type_empty_string_preserved",
+      "description": "An explicit empty string type is preserved, NOT defaulted to 'user'.",
+      "claims": { "sub": "u1", "type": "" },
+      "expected_identity": { "id": "u1", "type": "", "roles": [] }
+    },
+    {
+      "id": "numeric_type_coerced",
+      "claims": { "sub": "u1", "type": 7 },
+      "expected_identity": { "id": "u1", "type": "7", "roles": [] }
+    },
+    {
+      "id": "non_scalar_role_elements_dropped",
+      "description": "Object/array role elements are dropped; scalar elements are coerced.",
+      "claims": { "sub": "u1", "roles": ["admin", { "x": 1 }, ["nested"], 9] },
+      "expected_identity": { "id": "u1", "type": "user", "roles": ["admin", "9"] }
+    }
+  ],
+  "reject_cases": [
+    {
+      "id": "object_sub_rejected",
+      "description": "A non-scalar sub is not a valid identity -> token rejected (authenticate returns None).",
+      "claims": { "sub": { "id": 1 }, "type": "user" },
+      "expected_reject": true
+    },
+    {
+      "id": "array_sub_rejected",
+      "claims": { "sub": ["a", "b"] },
+      "expected_reject": true
+    },
+    {
+      "id": "null_sub_rejected",
+      "claims": { "sub": null, "type": "user" },
+      "expected_reject": true
+    },
+    {
+      "id": "missing_sub_rejected",
+      "claims": { "type": "user", "roles": ["admin"] },
+      "expected_reject": true
+    },
+    {
+      "id": "expired_token_rejected",
+      "description": "exp in the past -> None (no exception).",
+      "claims": { "sub": "u1", "exp_offset_seconds": -3600 },
+      "expected_reject": true
+    },
+    {
+      "id": "wrong_signature_rejected",
+      "description": "Token signed with a different secret than the authenticator -> None.",
+      "claims": { "sub": "u1" },
+      "sign_with_secret": "wrong-secret",
+      "expected_reject": true
+    },
+    {
+      "id": "missing_authorization_header",
+      "description": "Empty headers -> None.",
+      "headers": {},
+      "expected_reject": true
+    }
+  ],
+  "notes": {
+    "known_divergences": [
+      "Python additionally sets PyJWT options['verify_sub']=False so a scalar numeric sub reaches the shared coercion helper instead of PyJWT's RFC string-only rejection. TypeScript/Rust have no such decode-time check. The observable result asserted here is identical across all three.",
+      "The shared helper is named _claim_to_string (Python) / claimToString (TS) / claim_to_string (Rust). Name is not asserted; only the coerced Identity is."
+    ]
+  }
+}

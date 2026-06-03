@@ -1,0 +1,96 @@
+{
+  "description": "A2A Part <-> module input/output conversion parity (Algorithm A-PART). The runner calls PartConverter.output_to_parts / parts_to_input directly and partial-matches the result, or asserts the raised error-message substring. parts_to_input raises a plain language-native error (ValueError / Error / Err<String>) WITHOUT a JSON-RPC code; code/Task mapping happens upstream (see notes). A2A 1.0 Part is a flat oneof: {text} | {data} | {raw|url}; output_to_parts returns an Artifact {artifactId: 'art-{taskId|uuid}', parts: [...]} and a DataPart carries NO mediaType.",
+  "contract_version": "1.0",
+  "sub_algorithm": "A-PART",
+  "test_cases": [
+    {
+      "id": "dict_output_to_data_part",
+      "direction": "output_to_parts",
+      "input": { "result": 42, "status": "ok" },
+      "task_id": "t1",
+      "expected_artifact_id": "art-t1",
+      "expected_parts": [{ "data": { "result": 42, "status": "ok" } }]
+    },
+    {
+      "id": "string_output_to_text_part",
+      "direction": "output_to_parts",
+      "input": "Hello, world!",
+      "task_id": "t1",
+      "expected_parts": [{ "text": "Hello, world!" }]
+    },
+    {
+      "id": "array_output_to_json_text_part",
+      "description": "Arrays are JSON-serialized into a text Part (json.dumps / JSON.stringify / serde_json), NOT a data Part.",
+      "direction": "output_to_parts",
+      "input": [1, 2, 3],
+      "task_id": "t1",
+      "expected_parts": [{ "text": "[1,2,3]" }]
+    },
+    {
+      "id": "null_output_to_empty_parts",
+      "direction": "output_to_parts",
+      "input": null,
+      "task_id": "t1",
+      "expected_artifact_id": "art-t1",
+      "expected_parts": []
+    },
+    {
+      "id": "data_part_to_dict_input",
+      "direction": "parts_to_input",
+      "parts": [{ "data": { "width": 512, "height": 512 } }],
+      "input_schema": { "type": "object" },
+      "expected_input": { "width": 512, "height": 512 }
+    },
+    {
+      "id": "text_part_object_schema_autoparses_json",
+      "direction": "parts_to_input",
+      "parts": [{ "text": "{\"width\": 256, \"height\": 256}" }],
+      "input_schema": { "type": "object" },
+      "expected_input": { "width": 256, "height": 256 }
+    },
+    {
+      "id": "text_part_non_object_schema_raw_string",
+      "direction": "parts_to_input",
+      "parts": [{ "text": "hello" }],
+      "input_schema": { "type": "string" },
+      "expected_input": "hello"
+    }
+  ],
+  "error_cases": [
+    {
+      "id": "empty_parts_list",
+      "direction": "parts_to_input",
+      "parts": [],
+      "input_schema": {},
+      "expected_error_message": ["Message must contain at least one Part"]
+    },
+    {
+      "id": "multiple_parts_unsupported",
+      "direction": "parts_to_input",
+      "parts": [{ "text": "a" }, { "text": "b" }],
+      "input_schema": {},
+      "expected_error_message": ["Multiple parts are not supported"]
+    },
+    {
+      "id": "invalid_json_text_part_object_schema",
+      "direction": "parts_to_input",
+      "parts": [{ "text": "not json {" }],
+      "input_schema": { "type": "object" },
+      "expected_error_message": ["TextPart text is not valid JSON"]
+    },
+    {
+      "id": "file_part_unsupported",
+      "direction": "parts_to_input",
+      "parts": [{ "url": "http://example.com/x" }],
+      "input_schema": {},
+      "expected_error_message": ["FilePart is not supported"]
+    }
+  ],
+  "notes": {
+    "known_divergences": [
+      "parts_to_input raises a plain language-native error (Python ValueError, TS Error, Rust Err<String>) with NO JSON-RPC code attached. In the message/send server flow these surface as a FAILED task (a Task already exists), not a top-level -32602 — see skill_resolution.json (unparseable_textpart_yields_failed_task). Only the human-readable message substring is asserted here.",
+      "A2A 1.0 DataPart carries no mediaType field; an output dict becomes a flat {data: ...} Part. (docs/spec/test-plan.md TC-PRT-001 mentions part.mediaType; that predates the 1.0 protobuf Part and is not emitted on the wire.)",
+      "expected_parts uses the JSON oneof projection ({text}/{data}); each SDK builds its native Part (protobuf oneof in Python/Rust, {content:{$case}} in TS) and the runner compares the projected value. output_to_parts returns an Artifact wrapper with artifactId 'art-{taskId}' (or 'art-{uuid}' when taskId is empty)."
+    ]
+  }
+}
