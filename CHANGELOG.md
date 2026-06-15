@@ -5,6 +5,21 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.4.1] - 2026-06-15
+
+Patch release. Bumps the required apcore runtime floor to 0.24.0 and apcore-toolkit to 0.8.1 across all three SDKs. No code, API, or wire-protocol changes — the A2A 1.0 contract is unchanged. All suites pass unmodified: Python 332, TypeScript 306, Rust 106.
+
+### Changed
+
+- **Runtime floor bumped** — `apcore >= 0.24.0` (from `>=0.22.0`) and `apcore-toolkit >= 0.8.1` (from `>=0.8.0`) in all SDKs (Rust: `apcore = "0.24"`, whose previous `"0.22"` caret hard-capped below 0.23 and required the bump). The adapter surface is unaffected by the 0.22 → 0.24 delta.
+
+  apcore 0.23.0–0.24.0 changes reviewed for adapter impact — none required a change:
+  - **Per-instance `ToggleState` (0.24.0, apcore #71)** — `Executor` / `register_sys_modules` gained an optional per-instance toggle state; all SDK call sites use the back-compat form and fall back to the process-global toggle state, behaviorally identical for a single-registry server.
+  - **`CircuitBreakerMiddleware` constructor rewrite (0.23.0, breaking)** — not used by the adapter.
+  - **AI error-recovery metadata auto-populated on `ModuleError` (0.23.0)** — `user_fixable` / `ai_guidance` now surface through serialized errors automatically; the adapter never backfilled them.
+  - **`A2ASubscriber` 4xx no-retry (0.23.0)** — applies to apcore's own event-system subscriber, not this adapter.
+
+
 ## [0.4.0] - 2026-06-01
 
 ### Changed

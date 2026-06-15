@@ -1,3 +1,7 @@
+---
+description: "Software Requirements Specification (IEEE 830) for apcore-a2a: functional and non-functional requirements with traceability IDs for the A2A adapter's server, client, and modules."
+---
+
 # Software Requirements Specification: apcore-a2a
 
 | Field       | Value                                                                    |

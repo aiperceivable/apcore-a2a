@@ -1,3 +1,7 @@
+---
+description: "Client module spec: A2AClient for calling remote A2A agents (send, stream, manage tasks) plus AgentCardFetcher for cached card discovery; depends only on httpx and stdlib."
+---
+
 # Feature: Client Module
 
 | Field | Value |

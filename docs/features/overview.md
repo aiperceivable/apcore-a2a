@@ -1,3 +1,7 @@
+---
+description: "Index of apcore-a2a feature specs: feature map, priorities, and dependency graph across adapters, storage, server-core, streaming, auth, client, public-api, cli, explorer, and ops."
+---
+
 # apcore-a2a Feature Specs Overview
 
 This directory contains implementation-level feature specifications for **apcore-a2a** — the automatic A2A protocol adapter for the apcore module registry.

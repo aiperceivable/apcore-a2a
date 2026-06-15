@@ -1,3 +1,7 @@
+---
+description: "Ops module spec: operational endpoints GET /health (liveness) and GET /metrics (task counters) plus dynamic Agent Card re-registration on runtime registry changes."
+---
+
 # Feature: Ops Module
 
 | Field | Value |

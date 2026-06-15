@@ -1,3 +1,7 @@
+---
+description: "Public API spec: the top-level package entry point exposing serve() (blocking), async_serve() (ASGI app), and re-exporting A2AClient, wiring all subsystems via A2AServerFactory."
+---
+
 # Feature: Public API
 
 | Field | Value |

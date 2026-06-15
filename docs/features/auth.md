@@ -1,3 +1,7 @@
+---
+description: "Auth module spec: JWT/Bearer authentication for the A2A server, validating tokens, mapping claims to apcore Identity, and bridging identity to the Executor via ASGI ContextVar."
+---
+
 # Feature: Auth Module
 
 | Field | Value |

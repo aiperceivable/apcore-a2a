@@ -1,3 +1,7 @@
+---
+description: "Server-core spec: factory, execution router, task state machine, and JSON-RPC/REST transport; superseded by a2a-sdk's ApCoreAgentExecutor and A2AServerFactory wiring."
+---
+
 # Feature: Server Core
 
 | Field | Value |

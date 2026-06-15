@@ -1,3 +1,7 @@
+---
+description: "Product Requirements Document for apcore-a2a: background, problem statement, and goals for the adapter that auto-converts an apcore registry into an A2A agent server and client."
+---
+
 # Product Requirements Document: apcore-a2a
 
 | Field            | Value                                                                  |

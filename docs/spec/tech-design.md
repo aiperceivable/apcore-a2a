@@ -1,3 +1,7 @@
+---
+description: "Technical Design Document (Google/RFC format) for apcore-a2a: high-level architecture and per-module design for the adapter exposing apcore modules as A2A agents."
+---
+
 # Technical Design Document: apcore-a2a
 
 | Field       | Value                                                                    |

@@ -1,3 +1,7 @@
+---
+description: "Getting started guide: install apcore-a2a, serve your first A2A agent, and call remote agents, with parallel Python, TypeScript, and Rust code examples and prerequisites."
+---
+
 # Getting Started
 
 This guide walks you through installing **apcore-a2a**, serving your first A2A agent, and calling remote agents — in Python, TypeScript, and Rust.

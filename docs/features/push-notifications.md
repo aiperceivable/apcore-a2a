@@ -1,3 +1,7 @@
+---
+description: "Push notifications spec: webhook-based async delivery of task state changes, POSTing TaskStatusUpdateEvent payloads with retry; superseded by a2a-sdk's push config store."
+---
+
 # Feature: Push Notification Manager
 
 | Field | Value |

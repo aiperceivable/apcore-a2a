@@ -1,3 +1,7 @@
+---
+description: "Storage module spec: pluggable task persistence defining the TaskStore protocol (save/get/delete) with InMemoryTaskStore default; superseded by a2a-sdk's TaskStore."
+---
+
 # Feature: Storage Module
 
 | Field | Value |

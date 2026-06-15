@@ -1,3 +1,7 @@
+---
+description: "Adapters module spec: five pure-logic converters (AgentCardBuilder, SkillMapper, SchemaConverter, ErrorMapper, PartConverter) mapping apcore metadata to A2A structures."
+---
+
 # Feature: Adapters Module
 
 | Field | Value |

@@ -1,3 +1,7 @@
+---
+description: "Test Plan (IEEE 829) for apcore-a2a: test strategy, environment, and SRS-traceable test cases verifying the A2A adapter's server, client, streaming, and auth behavior."
+---
+
 # Test Plan: apcore-a2a
 
 | Field       | Value                                                                 |

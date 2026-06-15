@@ -1,3 +1,7 @@
+---
+description: "Explorer module spec: browser-based UI for testing an A2A agent, mounted as a Starlette sub-app at a configurable prefix and served as a single self-contained HTML file."
+---
+
 # Feature: Explorer UI
 
 | Field | Value |

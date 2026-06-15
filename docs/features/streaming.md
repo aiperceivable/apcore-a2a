@@ -1,3 +1,7 @@
+---
+description: "Streaming module spec: A2A SSE streaming for message/stream and tasks/resubscribe, converting task transitions and executor output into typed SSE events; superseded by a2a-sdk."
+---
+
 # Feature: Streaming Handler
 
 | Field | Value |

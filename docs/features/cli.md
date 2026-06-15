@@ -1,3 +1,7 @@
+---
+description: "CLI module spec: the apcore-a2a command-line entry point with a serve subcommand that discovers modules from an extensions dir and launches an A2A server without writing code."
+---
+
 # Feature: CLI Module
 
 | Field | Value |
