@@ -5,6 +5,20 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.4.2] - 2026-06-25
+
+Patch release. Bumps the required apcore runtime floor to 0.25.0 and apcore-toolkit to 0.9.1 across all three SDKs. No code, API, or wire-protocol changes — the A2A 1.0 contract is unchanged. All suites pass unmodified: Python 332, TypeScript 306, Rust 106.
+
+### Changed
+
+- **Runtime floor bumped** — `apcore >= 0.25.0` (from `>=0.24.0`) and `apcore-toolkit >= 0.9.1` (from `>=0.8.1`) in all SDKs (Rust: `apcore = "0.25"`). The adapter surface is unaffected by the 0.24 → 0.25 delta.
+
+  apcore 0.25.0 and apcore-toolkit 0.9.0–0.9.1 changes reviewed for adapter impact — none required a change:
+  - **Config-driven ACL discovery (0.25.0, apcore #74)** — `ACL.discover(config)` is auto-wired during `APCore` construction, but is skipped when the caller supplies its own `Executor` (as all three SDK adapters do), so an explicitly configured ACL is never clobbered.
+  - **Registry module-id constants promoted to the public surface (0.25.0, apcore #30)** — export-surface-only addition; no behavior change.
+  - **apcore-toolkit OpenAPI parser hardening (0.9.0–0.9.1)** — robustness fixes (integer status-code keys, explicit-`null` fields) with no public API change; the adapters use only `deep_resolve_refs` / `deepResolveRefs`, which is unaffected.
+
+
 ## [0.4.1] - 2026-06-15
 
 Patch release. Bumps the required apcore runtime floor to 0.24.0 and apcore-toolkit to 0.8.1 across all three SDKs. No code, API, or wire-protocol changes — the A2A 1.0 contract is unchanged. All suites pass unmodified: Python 332, TypeScript 306, Rust 106.
