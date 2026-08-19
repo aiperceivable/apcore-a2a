@@ -53,8 +53,8 @@ class StreamingHandler:
     ) -> StreamingResponse | dict:
         """Reconnect to existing task's SSE stream (tasks/resubscribe)."""
 
-    def _format_sse_event(self, event: dict, event_id: int) -> str:
-        """Format as SSE: 'id: {n}\\ndata: {json}\\n\\n'"""
+    def _format_sse_event(self, event: dict, request_id: str | int) -> str:
+        """Format as SSE: 'data: {json-rpc response carrying the event}\\n\\n'"""
 
     def _make_status_event(self, task_id: str, state: str, message: str | None = None, artifacts: list | None = None) -> dict:
         """Build TaskStatusUpdateEvent dict."""
@@ -118,24 +118,36 @@ async def _stream_generator(task_id, queue, params, identity):
 All events follow the SSE spec (`text/event-stream`). Each `data:` line carries
 one **A2A 1.0** event. A2A 1.0 is protobuf-derived: events are a `oneof`
 discriminated by the wrapper key (`task` / `statusUpdate` / `artifactUpdate` /
-`msg`) — there is no `type`/`kind` field and no `final` flag. Field names are
+`message`) — there is no `type`/`kind` field and no `final` flag. Field names are
 camelCase, and `TaskState` serializes as its full enum name
 (`TASK_STATE_SUBMITTED`, `TASK_STATE_WORKING`, `TASK_STATE_COMPLETED`, …).
 `Part` is a flattened `oneof`: a text part is `{"text":"…"}`, a data part is
 `{"data":{…}}` (no `type` discriminator).
 
+Each `data:` carries a complete **JSON-RPC response** whose `result` is the
+event, with `id` echoing the `message/stream` request. There is no SSE `id:`
+line: the JSON-RPC `id` is the correlator, and neither upstream SDK emits one
+(`a2a-python`'s SSE generator sets only `data`, and `event` on the error frame).
+A bare `{"statusUpdate":…}` payload is **not** the wire format — an off-the-shelf
+`a2a-python` / `a2a-js` client cannot parse it.
+
 ```
-id: 1
-data: {"statusUpdate":{"taskId":"abc-123","contextId":"ctx-xyz","status":{"state":"TASK_STATE_SUBMITTED","timestamp":"2026-03-03T10:00:00.000Z"}}}
+data: {"jsonrpc":"2.0","id":"req-1","result":{"statusUpdate":{"taskId":"abc-123","contextId":"ctx-xyz","status":{"state":"TASK_STATE_SUBMITTED","timestamp":"2026-03-03T10:00:00.000Z"}}}}
 
-id: 2
-data: {"statusUpdate":{"taskId":"abc-123","contextId":"ctx-xyz","status":{"state":"TASK_STATE_WORKING","timestamp":"2026-03-03T10:00:00.050Z"}}}
+data: {"jsonrpc":"2.0","id":"req-1","result":{"statusUpdate":{"taskId":"abc-123","contextId":"ctx-xyz","status":{"state":"TASK_STATE_WORKING","timestamp":"2026-03-03T10:00:00.050Z"}}}}
 
-id: 3
-data: {"artifactUpdate":{"taskId":"abc-123","contextId":"ctx-xyz","artifact":{"artifactId":"art-001","parts":[{"data":{"progress":50}}]},"append":false,"lastChunk":false}}
+data: {"jsonrpc":"2.0","id":"req-1","result":{"artifactUpdate":{"taskId":"abc-123","contextId":"ctx-xyz","artifact":{"artifactId":"art-001","parts":[{"data":{"progress":50}}]},"append":false,"lastChunk":false}}}
 
-id: 4
-data: {"statusUpdate":{"taskId":"abc-123","contextId":"ctx-xyz","status":{"state":"TASK_STATE_COMPLETED","timestamp":"2026-03-03T10:00:05.000Z"}}}
+data: {"jsonrpc":"2.0","id":"req-1","result":{"statusUpdate":{"taskId":"abc-123","contextId":"ctx-xyz","status":{"state":"TASK_STATE_COMPLETED","timestamp":"2026-03-03T10:00:05.000Z"}}}}
+
+```
+
+A stream that fails mid-flight sends a JSON-RPC *error* response the same way,
+tagged `event: error`:
+
+```
+event: error
+data: {"jsonrpc":"2.0","id":"req-1","error":{"code":-32603,"message":"Internal server error"}}
 
 ```
 

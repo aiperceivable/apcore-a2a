@@ -75,7 +75,11 @@ Top-level package entry point. Exposes `serve()` (blocking), `async_serve()` (re
 
     ```rust
     // src/lib.rs — top-level public re-exports:
-    pub const VERSION: &str = "0.4.0";
+
+    // Derived, not a literal: a hand-maintained constant drifts from the
+    // packaged version on every release and is then reported on the Agent Card
+    // and by `apcore-a2a --version`.
+    pub const VERSION: &str = env!("CARGO_PKG_VERSION");
 
     pub use apcore_a2a::{
         serve, async_serve, async_serve_with_auth, build_app, build_app_with_auth,
@@ -89,7 +93,11 @@ Top-level package entry point. Exposes `serve()` (blocking), `async_serve()` (re
         register_a2a_error_formatter, A2aErrorFormatter, AdapterError,
         AgentCardBuilder, ErrorMapper, PartConverter, SchemaConverter, SkillMapper,
     };
-    pub use server::{A2AServerFactory, ApCoreAgentExecutor};
+    pub use server::{A2AServerFactory, ApCoreAgentExecutor, CreateOptions};
+    pub use storage::{
+        CallContext, InMemoryPushConfigStore, InMemoryTaskStore, ListParams, OwnerId,
+        PushConfigStore, StoreError, TaskStore,
+    };
     pub use client::{A2AClient, A2AClientError, AgentCardFetcher, ClientResult};
     ```
 

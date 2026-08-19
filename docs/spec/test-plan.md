@@ -2072,7 +2072,7 @@ schema = {
 1. Send first message with no `contextId` — record returned `task.contextId` as `ctx-abc`.
 2. Send second message with `contextId = "ctx-abc"`.
 3. Assert second task `contextId == "ctx-abc"`.
-4. Call `tasks/list` filtering by `contextId == "ctx-abc"`.
+4. Call `ListTasks` filtering by `contextId == "ctx-abc"`.
 5. Assert 2 tasks returned.
 
 **Expected Result:** Both tasks share same contextId; list returns 2 tasks.
@@ -2156,7 +2156,7 @@ schema = {
 
 ---
 
-#### TC-INT-008: tasks/list with context_id filter returns correct tasks
+#### TC-INT-008: ListTasks with context_id filter returns correct tasks
 
 | Field | Value |
 |-------|-------|
@@ -2167,9 +2167,9 @@ schema = {
 **Test Steps:**
 1. Create 3 tasks with `context_id = "ctx-X"`.
 2. Create 2 tasks with `context_id = "ctx-Y"`.
-3. POST `tasks/list` with `params = {"contextId": "ctx-X"}`.
+3. POST `ListTasks` with `params = {"contextId": "ctx-X"}`.
 4. Assert 3 tasks returned.
-5. POST `tasks/list` with `params = {"contextId": "ctx-Y"}`.
+5. POST `ListTasks` with `params = {"contextId": "ctx-Y"}`.
 6. Assert 2 tasks returned.
 
 **Expected Result:** Filtering by contextId works correctly.

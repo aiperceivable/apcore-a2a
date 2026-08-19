@@ -14,10 +14,16 @@ description: "Push notifications spec: webhook-based async delivery of task stat
 | Depends On | F-02 (storage), F-03 (server-core — TaskManager) |
 | Blocks | F-08 (public-api, when push_notifications=True) |
 
-> **Implementation Note**: The `PushNotificationManager` described in this spec has been superseded
-> by `a2a-sdk`'s `InMemoryPushNotificationConfigStore` (from
-> `a2a.server.tasks.inmemory_push_notification_config_store`). Push notification delivery and retry
-> logic are handled internally by the SDK. This document reflects the original design intent.
+> **Implementation Note**: The `PushNotificationManager` described in this spec has been superseded,
+> differently per language. Python and TypeScript delegate to their upstream SDK — Python to
+> `a2a-sdk`'s `InMemoryPushNotificationConfigStore` (from
+> `a2a.server.tasks.inmemory_push_notification_config_store`) — which handles config storage,
+> delivery and retry internally, and is not injectable from these adapters. Rust has no upstream SDK,
+> so it defines its own pluggable `PushConfigStore` trait (see
+> [storage](storage.md)) and performs delivery itself (3 attempts, 1s/2s/4s backoff). Keeping it
+> separate from the `TaskStore` is what lets a persistent deployment restore tasks and their webhook
+> targets together; configs are owner-scoped exactly as tasks are, so one principal cannot redirect
+> or suppress another's notifications. This document otherwise reflects the original design intent.
 
 ## Purpose
 

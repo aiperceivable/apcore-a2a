@@ -5,6 +5,130 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.5.0] - 2026-08-17
+
+Minor release across all three SDKs. Task-addressed methods are now scoped to the
+authenticated principal, and failed tasks no longer collapse every error to a fixed
+string — from `aiperceivable/apexe` issues #33, #34 and #35. The runtime floor moves
+to apcore 0.27.
+
+**Rust carries a breaking change**: task ownership moved inside the `TaskStore`, so
+it survives a restart. Python and TypeScript needed no code change for that — both
+re-export their upstream SDK's `TaskStore`, which already took a `ServerCallContext`
+and already bucketed by owner. Suites: Rust 161, Python 350, TypeScript 328.
+
+### Changed
+
+- **Task-addressed methods are scoped to the authenticated principal** in all three
+  SDKs — `tasks/get`, `tasks/cancel`, `tasks/list` and the three
+  `tasks/pushNotificationConfig/*`. Previously `tasks/list` returned every caller's
+  tasks including their output, and any task could be read, cancelled or
+  re-pointed at a webhook by whoever knew its id; only the unguessability of a
+  UUIDv4 stood in the way. Cross-principal access is masked as `-32001` so ids
+  cannot be probed, consistent with how ACL denials are already reported
+  (srs FR-ERR-003). Callers with no identity share one owner bucket, matching
+  upstream's `UnauthenticatedUser`.
+
+- **Failed tasks classify their errors instead of collapsing them.** Caller-fixable
+  failures — schema validation, invalid input, unknown module — now reach the caller
+  with their code, message and `ai_guidance`, which is what lets an agent on the
+  other end correct itself. Internal and unrecognized errors keep the fixed
+  `"Internal server error"` string and ACL denials stay masked, per the existing
+  `error_mapping.json` contract, which is unchanged.
+
+- **`features/storage.md`: owner scoping is now part of the `TaskStore` contract.**
+  Every method must be scoped by the call context; `get` and `delete` on another
+  owner's task must behave exactly as they do for a task that does not exist — never
+  a distinguishable error, or task ids become probeable — and `list` must return only
+  the caller's tasks. Bucketing on `(owner, task_id)` satisfies all of it at once.
+  No language can enforce this: upstream `a2a-python` states it as a SHOULD, and a
+  store that ignores its context disables isolation entirely. Recorded alongside is
+  the split of push-notification configs into their own pluggable store, so a
+  persistent deployment restores tasks and their webhook targets together.
+
+  Rust is the only SDK that defines these traits itself (there is no Rust a2a-sdk),
+  so it is where the contract is implemented; its `TaskStore` and `PushConfigStore`
+  signatures in this doc were updated to match.
+
+- **Runtime floor raised to apcore 0.27** in all three SDKs. Note for future
+  upgrades: 0.27's own breaking-change list is incomplete — `Registry::describe`
+  changed both its signature *and* its return value (a module's one-line description
+  became a whole Markdown document), which would have published the full document
+  into every `AgentSkill.description` on the Agent Card.
+
+- **`tasks/list` renamed to `ListTasks` throughout (srs, prd, tech-design,
+  test-plan, features).** The spec had required a method name that exists in no
+  A2A version: 1.0 calls task listing `ListTasks`, and 0.3 had no listing method
+  at all. Both SDK-backed implementations therefore could not serve it, while
+  the Rust server implemented the invented name and nothing else could reach it.
+  `srs.md` now also records the `A2A-Version: 1.0` header requirement, and why
+  the remaining method names stay in their 0.3 spellings.
+
+  FR-TSK-006's pagination fields were wrong in the same way: it specified
+  `cursor` / `limit` / `nextCursor`, while `ListTasksRequest` declares
+  `pageToken` / `pageSize` and answers with `nextPageToken` / `totalSize`. The
+  `pageSize <= 200` clamp it required is recorded as not implemented — no
+  upstream SDK enforces a ceiling, and the Rust server ignores list parameters
+  altogether (no `contextId` filter, no pagination).
+
+### Fixed
+
+- **`features/storage.md` corrected against the implementations.** Four statements
+  did not match any SDK: the Rust `TaskStore` signature predated the owner-carrying
+  call context; the "actual implementation" snippet re-exported from a `self::memory`
+  module that does not exist (the types are defined in `storage/mod.rs`); the a2a-sdk
+  interface was described as `save`/`get`/`delete` only, while 1.0 also has `list`
+  and passes a `ServerCallContext` to each; and `isinstance(store, TaskStore)` was
+  presented as a cross-language requirement when it is Python-only.
+
+- **Rust API surface brought back in sync** across `features/public-api.md`,
+  `features/server-core.md` and `spec/tech-design.md`: `A2AServerFactory::create`
+  takes a `CreateOptions` struct (was ten positional arguments); the crate-root
+  re-exports now list the `storage` types and `CreateOptions`; and `VERSION` is
+  derived from `CARGO_PKG_VERSION` rather than the hand-written `"0.4.0"` literal
+  the docs still showed — that literal had already drifted twice, which is why the
+  constant became derived in the first place.
+
+- **`features/push-notifications.md` no longer describes one implementation for
+  three languages.** Python and TypeScript delegate config storage, delivery and
+  retry to their upstream SDK and cannot inject a store; Rust defines its own
+  pluggable `PushConfigStore` and delivers itself. The note previously described
+  only the Python path.
+
+- **`spec/tech-design.md` §13.2 (Package Manifest) rebuilt from the shipped
+  manifests.** All three samples had drifted far past their version headings: the
+  Python one still read `version = "0.1.0"` with `apcore>=0.22.0` and
+  `a2a-sdk>=0.3.0`, and omitted `apcore-toolkit` entirely; the TypeScript one listed
+  `@a2a-js/sdk: ^0.3.0` against a shipped floor of `1.0.1`, plus `express ^4.19`
+  against `^5.1.0`, and omitted `apcore-js`; the Rust one listed `apcore = "0.22"`
+  and eight of its twenty-three dependencies. All 53 dependency lines across the
+  three samples are now verified equal to the manifests, and the section states that
+  the repo manifests are authoritative. Added the reasoning behind two pins that
+  look arbitrary otherwise: why `@a2a-js/sdk` is floored at `>=1.0.1` rather than
+  `^1.0.0`, and why `apcore` is the one dependency carrying an upper bound.
+
+- **The SSE wire format is documented as the one all three SDKs actually emit.**
+  `features/streaming.md`, `spec/srs.md` and both example blocks in
+  `spec/tech-design.md` showed a bare `data: {"statusUpdate":…}` payload preceded
+  by a monotonically increasing SSE `id:` line. No SDK produces either. Every
+  frame is a complete JSON-RPC response whose `result` holds the event, with `id`
+  echoing the `message/stream` request, and no `id:` line at all — upstream
+  `a2a-python`'s SSE generator sets only `data` (plus `event: error` on the error
+  frame), and the Rust `sse_event` never calls `.id()`. A client written against
+  the old text could not have parsed a real stream.
+
+- **The `oneof` wrapper key for a standalone message is `message`, not `msg`.**
+  Corrected in `features/streaming.md` and `spec/srs.md` (prose and the
+  wrapper-key table). Verified against the upstream proto descriptor:
+  `StreamResponse` maps `task -> task`, `message -> message`,
+  `status_update -> statusUpdate`, `artifact_update -> artifactUpdate`.
+
+- **`spec/tech-design.md` §13.3 (Docker) — two samples that could not have worked.**
+  The TypeScript Dockerfile ran `npm ci` against a `package-lock.json`; the repo
+  uses pnpm and ships only `pnpm-lock.yaml`. The Python one ran `pip install .`
+  before `COPY src/ src/`, which hatchling cannot satisfy — its wheel target is
+  `packages = ["src/apcore_a2a"]`.
+
 ## [0.4.2] - 2026-06-25
 
 Patch release. Bumps the required apcore runtime floor to 0.25.0 and apcore-toolkit to 0.9.1 across all three SDKs. No code, API, or wire-protocol changes — the A2A 1.0 contract is unchanged. All suites pass unmodified: Python 332, TypeScript 306, Rust 106.

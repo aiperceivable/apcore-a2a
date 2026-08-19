@@ -284,7 +284,9 @@ apcore-a2a is the second adapter in the planned family. It depends on the `apcor
 3. Malformed JSON SHALL return JSON-RPC error -32700 (Parse error).
 4. Invalid JSON-RPC structure SHALL return JSON-RPC error -32600 (Invalid Request).
 5. Unknown method names SHALL return JSON-RPC error -32601 (Method not found).
-6. The server SHALL dispatch the following A2A methods: `message/send`, `message/stream`, `tasks/get`, `tasks/list`, `tasks/cancel`, `tasks/resubscribe`, `tasks/pushNotificationConfig/set`, `tasks/pushNotificationConfig/get`, `tasks/pushNotificationConfig/delete`.
+6. The server SHALL dispatch the following A2A methods: `message/send`, `message/stream`, `tasks/get`, `ListTasks`, `tasks/cancel`, `tasks/resubscribe`, `tasks/pushNotificationConfig/set`, `tasks/pushNotificationConfig/get`, `tasks/pushNotificationConfig/delete`.
+
+   Task listing is named `ListTasks` because that is what A2A 1.0 calls it, and 0.3 had no task-listing method at all. Requests using it SHALL carry `A2A-Version: 1.0`; a request without that header is read as v0.3 (spec section 3.6.2), where the name does not exist. The other method names above are the 0.3 spellings, which every SDK still accepts through its v0.3 compatibility layer.
 7. Request body size SHALL be limited to 10 MB; requests exceeding this limit SHALL return HTTP 413.
 
 ---
@@ -759,7 +761,7 @@ apcore-a2a is the second adapter in the planned family. It depends on the `apcor
 
 ---
 
-#### FR-TSK-006: Implement tasks/list with filtering and pagination
+#### FR-TSK-006: Implement ListTasks with filtering and pagination
 
 | Field | Value |
 |-------|-------|
@@ -767,17 +769,17 @@ apcore-a2a is the second adapter in the planned family. It depends on the `apcor
 | **Priority** | P0 |
 | **PRD Trace** | FR-008 |
 
-**Description:** The system SHALL implement task listing with optional contextId filtering and cursor-based pagination.
+**Description:** The system SHALL implement task listing with optional contextId filtering and token-based pagination.
 
 **Rationale:** Clients managing multi-turn conversations need to retrieve all tasks within a context. Pagination prevents excessive response sizes.
 
 **Acceptance Criteria:**
-1. `tasks/list` without parameters SHALL return all tasks ordered by creation time (newest first).
-2. `tasks/list` with `{"contextId": "<id>"}` SHALL return only tasks belonging to the specified context.
-3. Pagination SHALL be supported via `cursor` (opaque string) and `limit` (integer) parameters.
-4. Default `limit` SHALL be 50; maximum `limit` SHALL be 200.
-5. Requests with `limit` exceeding 200 SHALL be clamped to 200 (not rejected).
-6. The response SHALL include a `nextCursor` field when more results are available.
+1. `ListTasks` without parameters SHALL return all tasks ordered by creation time (newest first).
+2. `ListTasks` with `{"contextId": "<id>"}` SHALL return only tasks belonging to the specified context.
+3. Pagination SHALL use the field names `ListTasksRequest` declares: `pageSize` (integer) and `pageToken` (opaque string). There is no `limit` or `cursor` field — sending one is rejected with `-32602` by both SDK-backed servers.
+4. Default `pageSize` SHALL be 50.
+5. The response SHALL include `nextPageToken` (empty string when exhausted) and `totalSize`.
+6. **Not implemented:** clamping `pageSize` to a maximum of 200 — the upstream SDKs apply no ceiling. The Rust server additionally ignores list parameters altogether: it returns every task belonging to the caller, with no `contextId` filtering and no pagination.
 7. The response SHALL include a `tasks` array containing Task objects.
 
 ---
@@ -1111,7 +1113,7 @@ apcore-a2a is the second adapter in the planned family. It depends on the `apcor
 **Acceptance Criteria:**
 1. `await client.get_task(task_id)` SHALL send `tasks/get` and return the Task object.
 2. `await client.cancel_task(task_id)` SHALL send `tasks/cancel` and return the updated Task.
-3. `await client.list_tasks(context_id=None)` SHALL send `tasks/list` with optional filter and return the task list.
+3. `await client.list_tasks(context_id=None)` SHALL send `ListTasks` with optional filter and return the task list.
 4. All methods SHALL raise typed exceptions for A2A error codes.
 
 ---
@@ -1177,7 +1179,7 @@ apcore-a2a is the second adapter in the planned family. It depends on the `apcor
 1. A `message/send` with the same `contextId` as an `input_required` task SHALL resume that task.
 2. The resumed task SHALL transition from `input_required` to `working`.
 3. The follow-up message content SHALL be available to the module as additional input.
-4. `tasks/list` with `contextId` filter SHALL return all tasks in the conversation, including the resumed task.
+4. `ListTasks` with `contextId` filter SHALL return all tasks in the conversation, including the resumed task.
 
 ---
 
@@ -2338,7 +2340,7 @@ apcore-a2a is the second adapter in the planned family. It depends on the `apcor
 **Postconditions:**
 1. Task is in terminal state (`completed` or `canceled`).
 2. Context contains two messages (original and follow-up).
-3. Both messages are retrievable via `tasks/list` with `contextId` filter.
+3. Both messages are retrievable via `ListTasks` with `contextId` filter.
 
 ---
 
@@ -2506,7 +2508,7 @@ The following matrix maps data entities to operations across the system's module
 
 | Entity | Create | Read | Update | Delete |
 |--------|:------:|:----:|:------:|:------:|
-| **Task** | FR-MSG-001 (message/send creates task), FR-MSG-002 (message/stream creates task) | FR-TSK-004 (tasks/get), FR-TSK-006 (tasks/list) | FR-TSK-001 (state transitions), FR-TSK-005 (tasks/cancel) | FR-STR-002 (TTL expiration) |
+| **Task** | FR-MSG-001 (message/send creates task), FR-MSG-002 (message/stream creates task) | FR-TSK-004 (tasks/get), FR-TSK-006 (ListTasks) | FR-TSK-001 (state transitions), FR-TSK-005 (tasks/cancel) | FR-STR-002 (TTL expiration) |
 | **Message** | FR-MSG-001 (incoming message), FR-MSG-003 (Part parsing) | FR-CTX-002 (context history read) | -- | FR-CTX-002 (FIFO eviction at max history) |
 | **Artifact** | FR-MSG-004 (output conversion) | FR-TSK-004 (tasks/get returns artifacts) | FR-MSG-002 (append during streaming) | -- |
 | **AgentCard** | FR-AGC-001 (generation at startup) | FR-AGC-003 (GET /.well-known/agent-card.json), FR-AGC-004 (extended card) | FR-AGC-005 (regeneration on module changes) | -- |
@@ -2712,7 +2714,7 @@ Message  1 --- * Part             (one Message contains many Parts)
 | `POST /` | `message/send` | Client -> Server | Synchronous message execution; returns completed Task |
 | `POST /` | `message/stream` | Client -> Server | Streaming execution; returns SSE event stream |
 | `POST /` | `tasks/get` | Client -> Server | Retrieve task by ID |
-| `POST /` | `tasks/list` | Client -> Server | List stored tasks |
+| `POST /` | `ListTasks` | Client -> Server | List stored tasks |
 | `POST /` | `tasks/cancel` | Client -> Server | Cancel in-flight task |
 | `POST /` | `tasks/resubscribe` | Client -> Server | Reconnect to active task SSE stream |
 | `POST /` | `tasks/pushNotificationConfig/set` | Client -> Server | Register webhook URL |
@@ -2734,7 +2736,7 @@ All JSON-RPC endpoints accept `Content-Type: application/json` and return `Conte
 #### 8.1.3 SSE Stream Events
 
 A2A 1.0 events are a protobuf-derived `oneof` discriminated by the wrapper key
-that is present (`task` / `statusUpdate` / `artifactUpdate` / `msg`). There is no
+that is present (`task` / `statusUpdate` / `artifactUpdate` / `message`). There is no
 `type` field and no `final` flag.
 
 | Wrapper key | Direction | Description |
@@ -2742,12 +2744,15 @@ that is present (`task` / `statusUpdate` / `artifactUpdate` / `msg`). There is n
 | `task` | Server -> Client | Full task snapshot |
 | `statusUpdate` | Server -> Client | Emitted on each task state transition |
 | `artifactUpdate` | Server -> Client | Emitted when module produces incremental output |
-| `msg` | Server -> Client | A standalone agent message |
+| `message` | Server -> Client | A standalone agent message |
 
-SSE event format:
+SSE event format — each `data:` is a complete JSON-RPC response whose `result`
+holds the event, with `id` echoing the `message/stream` request. There SHALL be
+no SSE `id:` line; the JSON-RPC `id` is the correlator, and neither upstream SDK
+emits one.
+
 ```
-id: <sequential_integer>
-data: {"statusUpdate": {"taskId": "<id>", "contextId": "<ctx>", "status": {"state": "TASK_STATE_WORKING", ...}}}
+data: {"jsonrpc": "2.0", "id": "<request id>", "result": {"statusUpdate": {"taskId": "<id>", "contextId": "<ctx>", "status": {"state": "TASK_STATE_WORKING", ...}}}}
 
 ```
 
@@ -2845,7 +2850,7 @@ The system consumes A2A types, JSON-RPC handling, and SSE utilities from the `a2
 | FR-005 | Task Lifecycle (State Machine) | P0 | FR-TSK-001, FR-TSK-002, FR-TSK-003 |
 | FR-006 | Execution Routing | P0 | FR-EXE-001, FR-EXE-002, FR-EXE-003 |
 | FR-007 | Error Mapping | P0 | FR-ERR-001, FR-ERR-002, FR-ERR-003, FR-ERR-004, FR-ERR-005, FR-ERR-006, FR-ERR-007, FR-ERR-008 |
-| FR-008 | tasks/get, tasks/list, tasks/cancel | P0 | FR-TSK-004, FR-TSK-005, FR-TSK-006 |
+| FR-008 | tasks/get, ListTasks, tasks/cancel | P0 | FR-TSK-004, FR-TSK-005, FR-TSK-006 |
 | FR-009 | SSE Streaming (message/stream) | P0 | FR-MSG-002, FR-MSG-005, FR-MSG-006 |
 | FR-010 | A2A Client | P0 | FR-CLI-001, FR-CLI-002, FR-CLI-003, FR-CLI-004, FR-CLI-005 |
 | FR-011 | Multi-Turn Conversations (contextId) | P0 | FR-CTX-001, FR-CTX-002, FR-CTX-003, FR-CTX-004 |
@@ -2972,7 +2977,7 @@ The system consumes A2A types, JSON-RPC handling, and SSE utilities from the `a2
 | `message/send` | `{message, metadata, contextId?}` | Task | Synchronous message execution |
 | `message/stream` | `{message, metadata, contextId?}` | SSE stream | Streaming execution |
 | `tasks/get` | `{id}` | Task | Retrieve task by ID |
-| `tasks/list` | `{}` | Task[] | List stored tasks |
+| `ListTasks` | `{}` | Task[] | List stored tasks |
 | `tasks/cancel` | `{id}` | Task | Cancel in-flight task |
 | `tasks/resubscribe` | `{id}` | SSE stream | Reconnect to task stream |
 | `tasks/pushNotificationConfig/set` | `{id, pushNotificationConfig: {url, ...}}` | PushNotificationConfig | Register webhook |

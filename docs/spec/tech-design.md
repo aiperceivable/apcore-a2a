@@ -848,11 +848,11 @@ Reuses the same approach as apcore-mcp's `SchemaConverter`: deep-copy schemas, i
     ```rust
     impl A2AServerFactory {
         pub fn new() -> Self  // registers A2A namespace + error formatter
-        // Returns (axum Router, AgentCard). Host/port come from `url`; auth is an
-        // Option<Arc<dyn Authenticator>> argument (no auth config field).
-        pub fn create(&self, registry: &Registry, executor: Arc<ApCoreAgentExecutor>, task_store: Arc<dyn TaskStore>,
-                      name: &str, description: &str, version: &str, url: &str,
-                      auth: Option<Arc<dyn Authenticator>>, explorer: bool, explorer_prefix: &str) -> (Router, AgentCard)
+        // Returns (axum Router, AgentCard). Host/port come from `url`. Everything
+        // else arrives in a CreateOptions struct — built by CreateOptions::new plus
+        // with_task_store / with_push_config_store / with_auth / with_explorer — so
+        // adding a component is not a breaking signature change.
+        pub fn create(&self, registry: &Registry, opts: CreateOptions) -> (Router, AgentCard)
     }
     ```
 
@@ -1075,7 +1075,7 @@ class TransportManager:
            - 'message/stream'  -> streaming_handler.handle_stream()
            - 'tasks/get'       -> task_manager.get_task()
            - 'tasks/cancel'    -> handle_cancel()
-           - 'tasks/list'      -> task_manager.list_tasks()
+           - 'ListTasks'       -> task_manager.list_tasks()
            - 'tasks/resubscribe' -> streaming_handler.handle_resubscribe()
            - 'tasks/pushNotificationConfig/set' -> push_manager.set_config()
            - 'tasks/pushNotificationConfig/get' -> push_manager.get_config()
@@ -1157,24 +1157,22 @@ class StreamingHandler:
         4. Subscribe to task events and start SSE stream from current point.
         """
 
-    def _format_sse_event(self, event: dict, event_id: int) -> str:
-        """Format event as SSE text: 'id: {id}\ndata: {json}\n\n'."""
+    def _format_sse_event(self, event: dict, request_id: str | int) -> str:
+        """Format as SSE: 'data: {json-rpc response carrying the event}\n\n'."""
 ```
 
-**SSE event format:**
+**SSE event format:** each `data:` carries a complete JSON-RPC response whose
+`result` is the event, `id` echoing the request. No SSE `id:` line — the
+JSON-RPC `id` correlates the frames, and neither upstream SDK emits one.
 
 ```
-id: 1
-data: {"statusUpdate":{"taskId":"abc-123","status":{"state":"TASK_STATE_SUBMITTED","timestamp":"2026-03-03T10:00:00Z"}}}
+data: {"jsonrpc":"2.0","id":"req-1","result":{"statusUpdate":{"taskId":"abc-123","status":{"state":"TASK_STATE_SUBMITTED","timestamp":"2026-03-03T10:00:00Z"}}}}
 
-id: 2
-data: {"statusUpdate":{"taskId":"abc-123","status":{"state":"TASK_STATE_WORKING","timestamp":"2026-03-03T10:00:00.050Z"}}}
+data: {"jsonrpc":"2.0","id":"req-1","result":{"statusUpdate":{"taskId":"abc-123","status":{"state":"TASK_STATE_WORKING","timestamp":"2026-03-03T10:00:00.050Z"}}}}
 
-id: 3
-data: {"artifactUpdate":{"taskId":"abc-123","artifact":{"artifactId":"art-001","parts":[{"data":{"progress":50}}]},"append":true,"lastChunk":false}}
+data: {"jsonrpc":"2.0","id":"req-1","result":{"artifactUpdate":{"taskId":"abc-123","artifact":{"artifactId":"art-001","parts":[{"data":{"progress":50}}]},"append":true,"lastChunk":false}}}
 
-id: 4
-data: {"statusUpdate":{"taskId":"abc-123","status":{"state":"TASK_STATE_COMPLETED","timestamp":"2026-03-03T10:00:05Z"}}}
+data: {"jsonrpc":"2.0","id":"req-1","result":{"statusUpdate":{"taskId":"abc-123","status":{"state":"TASK_STATE_COMPLETED","timestamp":"2026-03-03T10:00:05Z"}}}}
 
 ```
 
@@ -1316,7 +1314,7 @@ class PushNotificationManager:
             context_id: str | None = None,
             limit: int = 50,
         ) -> dict:
-            """List tasks via tasks/list."""
+            """List tasks via ListTasks."""
 
         async def close(self) -> None:
             """Close the underlying HTTP client."""
@@ -1603,9 +1601,12 @@ Default exempt paths: `{"/.well-known/agent-card.json", "/.well-known/agent.json
 **File**: `storage/protocol.py`
 
 > The Python protocol below reflects the original design intent. The shipped
-> task-persistence surface differs per language: TypeScript re-exports the
-> `@a2a-js/sdk/server` `TaskStore` (`save`/`load`/`delete`/`list`); Rust defines a
-> narrower `TaskStore` trait (`save`/`get`/`delete`/`list`).
+> task-persistence surface differs per language: Python and TypeScript re-export
+> their upstream SDK's `TaskStore`, which takes a `ServerCallContext` on every
+> method and buckets tasks by a resolved owner; Rust defines its own `TaskStore`
+> (`save`/`get`/`delete`/`list`) plus a separate `PushConfigStore`, both taking a
+> `CallContext` and returning `StoreError`. Owner scoping is part of the contract
+> in all three — see [storage](../features/storage.md).
 
 === "Python"
 
@@ -1948,24 +1949,20 @@ All JSON-RPC methods are dispatched via `POST /` with `Content-Type: application
 **Response**: HTTP 200 with `Content-Type: text/event-stream`. Body is a sequence of SSE events:
 
 ```
-id: 1
-data: {"statusUpdate":{"taskId":"task-uuid","contextId":"ctx-uuid","status":{"state":"TASK_STATE_SUBMITTED","timestamp":"2026-03-03T10:00:00Z"}}}
+data: {"jsonrpc":"2.0","id":"req-1","result":{"statusUpdate":{"taskId":"task-uuid","contextId":"ctx-uuid","status":{"state":"TASK_STATE_SUBMITTED","timestamp":"2026-03-03T10:00:00Z"}}}}
 
-id: 2
-data: {"statusUpdate":{"taskId":"task-uuid","contextId":"ctx-uuid","status":{"state":"TASK_STATE_WORKING","timestamp":"2026-03-03T10:00:00.050Z"}}}
+data: {"jsonrpc":"2.0","id":"req-1","result":{"statusUpdate":{"taskId":"task-uuid","contextId":"ctx-uuid","status":{"state":"TASK_STATE_WORKING","timestamp":"2026-03-03T10:00:00.050Z"}}}}
 
-id: 3
-data: {"artifactUpdate":{"taskId":"task-uuid","artifact":{"artifactId":"art-001","parts":[{"data":{"progress":50}}]},"append":true,"lastChunk":false}}
+data: {"jsonrpc":"2.0","id":"req-1","result":{"artifactUpdate":{"taskId":"task-uuid","artifact":{"artifactId":"art-001","parts":[{"data":{"progress":50}}]},"append":true,"lastChunk":false}}}
 
-id: 4
-data: {"statusUpdate":{"taskId":"task-uuid","contextId":"ctx-uuid","status":{"state":"TASK_STATE_COMPLETED","timestamp":"2026-03-03T10:00:05Z"}}}
+data: {"jsonrpc":"2.0","id":"req-1","result":{"statusUpdate":{"taskId":"task-uuid","contextId":"ctx-uuid","status":{"state":"TASK_STATE_COMPLETED","timestamp":"2026-03-03T10:00:05Z"}}}}
 
 ```
 
 **Boundary conditions:**
 - First event (TaskStatusUpdateEvent with `submitted`) emitted within 50ms of request receipt.
 - Final event is always TaskStatusUpdateEvent with terminal state.
-- Event `id` values are monotonically increasing integers starting at 1.
+- Frames carry no SSE `id:` line; the JSON-RPC `id` in each frame echoes the request and correlates the stream.
 - Non-streaming modules emit only status events (no artifact events during execution).
 
 ---
@@ -1995,7 +1992,7 @@ data: {"statusUpdate":{"taskId":"task-uuid","contextId":"ctx-uuid","status":{"st
 
 ---
 
-#### 5.1.4 `tasks/list`
+#### 5.1.4 `ListTasks`
 
 **Request:**
 
@@ -2003,7 +2000,7 @@ data: {"statusUpdate":{"taskId":"task-uuid","contextId":"ctx-uuid","status":{"st
 {
   "jsonrpc": "2.0",
   "id": "req-003",
-  "method": "tasks/list",
+  "method": "ListTasks",
   "params": {
     "contextId": "ctx-uuid",
     "cursor": "cursor-string",
@@ -2557,7 +2554,7 @@ sequenceDiagram
 
     Note over Client: Client can list all tasks in conversation
 
-    Client->>TaskMgr: tasks/list {contextId: ctx-001}
+    Client->>TaskMgr: ListTasks {contextId: ctx-001}
     TaskMgr-->>Client: {tasks: [task1], nextCursor: null}
 ```
 
@@ -3241,6 +3238,11 @@ def client(a2a_app):
 
 ### 13.2 Package Manifest
 
+> Snapshot of the shipped manifests at 0.5.0, trimmed of metadata that carries no
+> design information (keywords, classifiers, URLs, script aliases). The manifest
+> files in each SDK repo are authoritative; this section exists to record the
+> dependency surface the design assumes.
+
 === "Python"
 
     ```toml
@@ -3251,28 +3253,27 @@ def client(a2a_app):
 
     [project]
     name = "apcore-a2a"
-    version = "0.1.0"
-    description = "Automatic A2A Protocol Adapter for apcore Module Registry"
-    readme = "README.md"
-    license = "Apache-2.0"
+    version = "0.5.0"
     requires-python = ">=3.11"
+    license = "Apache-2.0"
     dependencies = [
-        "apcore>=0.22.0",
-        "a2a-sdk>=0.3.0",
-        "starlette>=0.27",
-        "uvicorn>=0.23",
-        "httpx>=0.24",
+        "apcore>=0.27.0",
+        "apcore-toolkit>=0.10.0",
+        "a2a-sdk[http-server]>=1.0.0",
+        "starlette>=0.40.0",
+        "uvicorn>=0.30.0",
+        "httpx>=0.27.0",
+        "PyJWT>=2.0",
     ]
 
     [project.optional-dependencies]
-    auth = ["PyJWT>=2.8"]
     dev = [
         "pytest>=7.0",
-        "pytest-asyncio>=0.23",
+        "pytest-asyncio>=0.21",
         "pytest-cov>=4.0",
-        "mypy>=1.8",
-        "ruff>=0.3",
-        "respx>=0.20",
+        "mypy>=1.0",
+        "ruff>=0.1",
+        "apdev[dev]>=0.2.1",
     ]
 
     [project.scripts]
@@ -3289,7 +3290,13 @@ def client(a2a_app):
     [tool.ruff]
     target-version = "py311"
     line-length = 120
+
+    [tool.coverage.report]
+    fail_under = 90
     ```
+
+    `PyJWT` is a hard dependency, not an `auth` extra: the JWT authenticator ships
+    in the default install.
 
 === "TypeScript"
 
@@ -3297,24 +3304,40 @@ def client(a2a_app):
     // package.json (ESM, Node >=18)
     {
       "name": "apcore-a2a",
-      "version": "0.4.0",
+      "version": "0.5.0",
       "type": "module",
-      "description": "Automatic A2A Protocol Adapter for apcore Module Registry",
       "license": "Apache-2.0",
+      "main": "./dist/index.js",
+      "types": "./dist/index.d.ts",
       "bin": { "apcore-a2a": "dist/cli.js" },
-      "engines": { "node": ">=18" },
+      "engines": { "node": ">=18.0.0" },
       "dependencies": {
-        "@a2a-js/sdk": "^0.3.0",
-        "express": "^4.19",
-        "jsonwebtoken": "^9.0"
+        "@a2a-js/sdk": ">=1.0.1",
+        "apcore-js": ">=0.27.0",
+        "apcore-toolkit": ">=0.10.0",
+        "express": "^5.1.0",
+        "jsonwebtoken": "^9.0.3",
+        "uuid": "^13.0.0"
       },
       "devDependencies": {
-        "typescript": "^5.4",
-        "vitest": "^1.5",
-        "supertest": "^7.0"
+        "@sinclair/typebox": "^0.34.48",
+        "@types/express": "^5.0.0",
+        "@types/jsonwebtoken": "^9.0.0",
+        "@types/node": "^20.0.0",
+        "@types/supertest": "^7.2.0",
+        "@types/uuid": "^10.0.0",
+        "@vitest/coverage-v8": "^3.0.0",
+        "apdev-js": "^0.2.0",
+        "supertest": "^7.2.2",
+        "typescript": "^5.5.0",
+        "vitest": "^3.0.0"
       }
     }
     ```
+
+    The `@a2a-js/sdk` floor is `>=1.0.1`, not `^1.0.0`: 1.0.0 bundled
+    `toJsonRpcError` and `A2AError` into two separate chunks, so an error thrown by
+    `DefaultRequestHandler` failed both `instanceof` checks in the Express bundle.
 
 === "Rust"
 
@@ -3322,25 +3345,47 @@ def client(a2a_app):
     # Cargo.toml (edition 2021)
     [package]
     name = "apcore-a2a"
-    version = "0.4.0"
+    version = "0.5.0"
     edition = "2021"
     license = "Apache-2.0"
-    description = "A2A protocol adapter for apcore"
+    description = "A2A protocol adapter for apcore — expose apcore modules as A2A agents"
 
     [dependencies]
-    apcore = "0.22"
-    apcore-toolkit = "0.8"
-    axum = "0.8"
+    apcore = ">=0.27, <0.28"
+    apcore-toolkit = ">=0.10.0"
+    axum = { version = "0.8", features = ["ws"] }
     tokio = { version = "1", features = ["full"] }
+    tokio-stream = "0.1"
+    async-stream = "0.3"
     async-trait = "0.1"
-    serde_json = "1"
-    jsonwebtoken = "9"
     futures-util = "0.3"
+    serde = { version = "1", features = ["derive"] }
+    serde_json = "1"
+    schemars = "0.8"
+    thiserror = "2"
+    tracing = "0.1"
+    tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+    clap = { version = "4", features = ["derive", "env"] }
+    jsonwebtoken = "9"
+    tower = "0.5"
+    tower-http = { version = "0.6", features = ["cors"] }
+    hyper = { version = "1", features = ["full"] }
+    reqwest = { version = "0.12", features = ["json", "stream"] }
+    regex = "1"
+    uuid = { version = "1", features = ["v4", "serde"] }
+    chrono = { version = "0.4", features = ["serde"] }
 
     [[bin]]
     name = "apcore-a2a"
     path = "src/bin/apcore-a2a.rs"
     ```
+
+    `apcore` carries an upper bound while the other pins do not. apcore 0.27's own
+    breaking-change list was incomplete — `Registry::describe` changed its return
+    *value* as well as its signature — so a caret range would let the next minor in
+    unannounced. Rust is also the only SDK whose lockfile is gitignored (library
+    crate) and whose CI does not pass `--locked`, so the range in `Cargo.toml` is
+    the only thing holding the floor.
 
 ### 13.3 Docker Setup
 
@@ -3353,10 +3398,11 @@ def client(a2a_app):
 
     WORKDIR /app
 
-    COPY pyproject.toml .
-    RUN pip install --no-cache-dir .
-
+    # src/ must be copied *before* the install: the wheel target is
+    # `packages = ["src/apcore_a2a"]`, so hatchling fails without it.
+    COPY pyproject.toml README.md ./
     COPY src/ src/
+    RUN pip install --no-cache-dir .
 
     # Default: serve with extensions from /app/extensions
     ENV EXTENSIONS_DIR=/app/extensions
@@ -3380,8 +3426,8 @@ def client(a2a_app):
 
     WORKDIR /app
 
-    COPY package.json package-lock.json ./
-    RUN npm ci --omit=dev
+    COPY package.json pnpm-lock.yaml ./
+    RUN corepack enable && pnpm install --frozen-lockfile --prod
 
     COPY dist/ dist/
 
@@ -3478,7 +3524,7 @@ and CLI feature specs.
 
 **Phase 1: Core (Week 1-3)**
 - Implement: `adapters/` (all five adapters), `server/factory.py`, `server/router.py`, `server/task_manager.py`, `server/transport.py`, `storage/` (protocol + InMemoryTaskStore), `__init__.py` (serve/async_serve).
-- Deliverables: Working `serve(registry)` with `message/send`, `tasks/get`, `tasks/cancel`, `tasks/list`, Agent Card at `/.well-known/agent-card.json`.
+- Deliverables: Working `serve(registry)` with `message/send`, `tasks/get`, `tasks/cancel`, `ListTasks`, Agent Card at `/.well-known/agent-card.json`.
 - SRS coverage: FR-SRV-*, FR-AGC-001/002/003, FR-SKL-*, FR-MSG-001/003/004, FR-TSK-*, FR-EXE-001/002, FR-ERR-*, FR-STR-*.
 - Test target: ~200 tests (unit + integration for core components).
 
@@ -3637,7 +3683,7 @@ All client-provided strings in log messages are truncated to 1,000 characters an
 | `message/send` | FR-MSG-001, FR-MSG-003, FR-MSG-004, FR-EXE-001, FR-EXE-002 |
 | `message/stream` | FR-MSG-002, FR-MSG-005, FR-MSG-006 |
 | `tasks/get` | FR-TSK-004 |
-| `tasks/list` | FR-TSK-006 |
+| `ListTasks` | FR-TSK-006 |
 | `tasks/cancel` | FR-TSK-005 |
 | `tasks/resubscribe` | FR-MSG-006 |
 | `tasks/pushNotificationConfig/set` | FR-PSH-001 |

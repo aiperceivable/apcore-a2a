@@ -11,6 +11,7 @@
 [![Rust](https://img.shields.io/badge/Rust-1.75%2B-orange.svg)](https://github.com/aiperceivable/apcore-a2a-rust)
 
 > **Build once, invoke by Code or AI.**
+> Every call validated, authorized, and evidenced.
 
 **apcore-a2a** is an automatic [A2A (Agent-to-Agent)](https://google.github.io/A2A/) protocol adapter for the [apcore](https://github.com/aiperceivable/apcore) ecosystem. It allows you to expose any apcore Module Registry as a fully functional, standards-compliant **A2A 1.0** agent with zero manual effort.
 

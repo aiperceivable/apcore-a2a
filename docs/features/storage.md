@@ -88,17 +88,46 @@ Pluggable task persistence layer. Defines the `TaskStore` protocol and provides 
     ```rust
     use async_trait::async_trait;
     use serde_json::Value;
+    use apcore_a2a::{CallContext, ListParams, StoreError};
 
     #[async_trait]
     pub trait TaskStore: Send + Sync {
-        async fn save(&self, task_id: &str, task: Value) -> Result<(), String>;
-        async fn get(&self, task_id: &str) -> Result<Option<Value>, String>;
-        async fn delete(&self, task_id: &str) -> Result<(), String>;
-        async fn list(&self) -> Result<Vec<Value>, String>;
+        async fn save(&self, task_id: &str, task: Value, ctx: &CallContext)
+            -> Result<(), StoreError>;
+        async fn get(&self, task_id: &str, ctx: &CallContext)
+            -> Result<Option<Value>, StoreError>;
+        async fn delete(&self, task_id: &str, ctx: &CallContext)
+            -> Result<(), StoreError>;
+        async fn list(&self, params: &ListParams, ctx: &CallContext)
+            -> Result<Vec<Value>, StoreError>;
+    }
+
+    // Push notification configs live in a matching, separately pluggable trait,
+    // so a persistent deployment restores tasks and their webhook targets
+    // together.
+    #[async_trait]
+    pub trait PushConfigStore: Send + Sync {
+        async fn save(&self, task_id: &str, config: Value, ctx: &CallContext)
+            -> Result<(), StoreError>;
+        async fn get(&self, task_id: &str, ctx: &CallContext)
+            -> Result<Option<Value>, StoreError>;
+        async fn delete(&self, task_id: &str, ctx: &CallContext)
+            -> Result<(), StoreError>;
     }
     ```
 
-**Runtime checkable**: `isinstance(store, TaskStore)` must work for duck-typed custom implementations.
+    **Owner scoping is part of the contract.** Every method must be scoped by
+    `ctx.owner()`: `get` and `delete` on another owner's task must behave
+    exactly as they do for a task that does not exist (never a distinguishable
+    error, or task ids become probeable), and `list` must return only the
+    caller's tasks. Bucketing on `(owner, task_id)` satisfies all of it at
+    once. A store that ignores `ctx` disables task isolation entirely; no
+    language in this project can enforce it — upstream `a2a-python` states the
+    same requirement as a SHOULD.
+
+**Runtime checkable (Python only)**: `isinstance(store, TaskStore)` must work for duck-typed custom
+implementations. TypeScript checks structurally at compile time; Rust requires an explicit `impl
+TaskStore`.
 
 ---
 
@@ -130,10 +159,13 @@ Default implementation using `dict` + `asyncio.Lock`.
 === "Rust"
 
     ```rust
-    use apcore_a2a::InMemoryTaskStore;
+    use apcore_a2a::{InMemoryPushConfigStore, InMemoryTaskStore};
 
-    // Backed by a Mutex<HashMap<String, Value>>; construct with no arguments.
+    // Backed by a Mutex<HashMap<OwnerId, HashMap<String, Value>>> — bucketed by
+    // owner, so isolation is a property of the data structure. Both construct
+    // with no arguments.
     let task_store = InMemoryTaskStore::new();
+    let push_config_store = InMemoryPushConfigStore::new();
     ```
 
 **Behavior:**
@@ -212,16 +244,22 @@ The storage module delegates entirely to the `a2a-sdk` library. The `storage/__i
 === "Rust"
 
     ```rust
-    // src/storage/mod.rs
-    pub use self::memory::InMemoryTaskStore;
-
-    // TaskStore is defined in this crate (see trait above).
+    // src/storage/mod.rs — defined in this crate, not re-exported from an SDK:
+    //   TaskStore, PushConfigStore, InMemoryTaskStore, InMemoryPushConfigStore,
+    //   CallContext, OwnerId, ListParams, StoreError
+    // All are re-exported at the crate root (src/lib.rs).
     ```
 
-The a2a-sdk `TaskStore` interface exposes `save`, `get`, and `delete` only. Push notification config
-and context storage are handled internally by the SDK. The custom `protocol.py`, `memory.py`, `list()`
-with cursor pagination, and `max_tasks` capacity limiting described above are **not implemented** —
-they reflect the original design intent before the a2a-sdk provided these components.
+The a2a-sdk 1.0 `TaskStore` interface exposes `save`, `get`, `delete` and `list`, each taking a
+`ServerCallContext`; its `InMemoryTaskStore` and `DatabaseTaskStore` bucket by an owner resolved from
+that context via an injectable `OwnerResolver`. Push notification config is handled by the SDK's own
+`PushNotificationConfigStore`. The custom `protocol.py`, `memory.py`, cursor pagination, and
+`max_tasks` capacity limiting described above are **not implemented** — they reflect the original
+design intent before the a2a-sdk provided these components.
+
+Rust is the exception: it defines its own `TaskStore` (there is no Rust a2a-sdk), so the
+owner-carrying `CallContext` and the separate `PushConfigStore` are implemented in this project. The
+resulting contract is deliberately the same one upstream states.
 
 ## File Structure
 

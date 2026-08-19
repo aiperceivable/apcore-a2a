@@ -89,8 +89,8 @@ HTTP client for calling remote A2A agents. Provides `A2AClient` for sending mess
             context_id: str | None = None,
             limit: int = 50,
         ) -> dict:
-            """List tasks via tasks/list.
-            Returns {tasks: [...], nextCursor: str|None}.
+            """List tasks via ListTasks.
+            Returns {tasks: [...], nextPageToken: str, totalSize: int}.
             """
 
         async def discover(self) -> dict:

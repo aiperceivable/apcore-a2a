@@ -284,7 +284,7 @@ apcore-a2a's unique advantages:
 
 **Acceptance Criteria:**
 - `tasks/get` returns the current state of a task by ID.
-- `tasks/list` returns tasks, optionally filtered by `contextId`.
+- `ListTasks` returns tasks, optionally filtered by `contextId`.
 - `tasks/cancel` transitions a cancelable task to `canceled` state.
 - Canceling a non-cancelable task returns error code -32002 (TaskNotCancelable).
 - Task state transitions follow the A2A state machine (no invalid transitions).
@@ -300,7 +300,7 @@ apcore-a2a's unique advantages:
 - Previous messages in the context are accessible to the module during execution.
 - A new `contextId` starts a fresh conversation.
 - The `input_required` state allows the orchestrator to provide additional input before resuming.
-- `tasks/list` can filter by `contextId` to retrieve all tasks in a conversation.
+- `ListTasks` can filter by `contextId` to retrieve all tasks in a conversation.
 
 #### US-007: Remote Agent Discovery and Invocation
 
@@ -719,7 +719,7 @@ serve(registry)
 
 ---
 
-#### FR-008: tasks/get, tasks/list, tasks/cancel
+#### FR-008: tasks/get, ListTasks, tasks/cancel
 
 **Title:** Task query and management JSON-RPC methods
 
@@ -730,8 +730,8 @@ serve(registry)
 **Acceptance Criteria:**
 1. `tasks/get` with `{"id": "<taskId>"}` returns the full Task object including status, artifacts, and history.
 2. `tasks/get` for a non-existent task ID returns error -32001 (TaskNotFound).
-3. `tasks/list` returns all tasks, optionally filtered by `contextId` parameter.
-4. `tasks/list` supports pagination via `cursor` and `limit` parameters (default limit: 50, max: 200).
+3. `ListTasks` returns all tasks, optionally filtered by `contextId` parameter.
+4. `ListTasks` supports pagination via `pageToken` and `pageSize` parameters (default `pageSize`: 50; no ceiling is enforced).
 5. `tasks/cancel` transitions a `submitted` or `working` task to `canceled` state.
 6. `tasks/cancel` triggers cancellation of the underlying apcore execution via CancelToken.
 7. `tasks/cancel` on a `completed`, `failed`, or already `canceled` task returns error -32002 (TaskNotCancelable).
@@ -803,7 +803,7 @@ async for event in client.stream_message(message):
 4. `client.stream_message(message)` sends `message/stream` and returns an async iterator of SSE events.
 5. `client.get_task(task_id)` sends `tasks/get` and returns the Task.
 6. `client.cancel_task(task_id)` sends `tasks/cancel`.
-7. `client.list_tasks(context_id=None)` sends `tasks/list` with optional filter.
+7. `client.list_tasks(context_id=None)` sends `ListTasks` with optional filter.
 8. Client supports Bearer token authentication via `auth` parameter.
 9. Client uses `httpx` for HTTP requests with configurable timeout (default: 30 seconds).
 10. Client raises typed exceptions for A2A error codes (`TaskNotFoundError`, `TaskNotCancelableError`, etc.).
@@ -831,7 +831,7 @@ async for event in client.stream_message(message):
 4. Tasks within the same context can access previous messages (conversation history).
 5. `input_required` state includes a message describing what additional input is needed.
 6. Follow-up message with the same `contextId` resumes the `input_required` task back to `working`.
-7. `tasks/list` can filter by `contextId` to retrieve all tasks in a conversation.
+7. `ListTasks` can filter by `contextId` to retrieve all tasks in a conversation.
 8. Context state is stored in the task store alongside tasks.
 9. Context history is bounded (configurable max messages, default: 100).
 
@@ -1136,7 +1136,7 @@ apcore-a2a serve --extensions-dir ./extensions --push-notifications
 | Schema mapping accuracy | 100% of apcore module fields correctly mapped to A2A Skill and Agent Card fields | Automated test suite with full field coverage |
 | Integration time | < 5 minutes from `pip install` to working A2A server | Timed walkthrough with documented quickstart |
 | Lines of user code for basic A2A server | <= 5 lines | Count lines in quickstart example |
-| A2A method coverage | 100% of A2A 1.0 methods implemented | Feature checklist: message/send, message/stream, tasks/get, tasks/list, tasks/cancel, tasks/resubscribe, push notification CRUD, agentCard/get |
+| A2A method coverage | 100% of A2A 1.0 methods implemented | Feature checklist: message/send, message/stream, tasks/get, ListTasks, tasks/cancel, tasks/resubscribe, push notification CRUD, agentCard/get |
 | Error mapping coverage | 100% of apcore error types mapped | Unit tests for each error type |
 | Test coverage | >= 90% line coverage | `pytest --cov` report |
 | P0 feature completion | 11/11 features pass acceptance criteria | Feature acceptance testing |

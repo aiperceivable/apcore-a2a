@@ -98,19 +98,38 @@ Creates the full ASGI application with all routes configured.
     impl A2AServerFactory {
         pub fn new() -> Self;  // registers A2A namespace + error formatter
 
-        pub fn create(
-            &self,
-            registry: &Registry,
+        // Options struct rather than positional arguments, so adding a
+        // component later is not a breaking signature change.
+        pub fn create(&self, registry: &Registry, opts: CreateOptions) -> (Router, AgentCard);
+    }
+
+    pub struct CreateOptions {
+        pub executor: Arc<ApCoreAgentExecutor>,
+        pub task_store: Arc<dyn TaskStore>,
+        pub push_config_store: Arc<dyn PushConfigStore>,
+        pub name: String,
+        pub description: String,
+        pub version: String,
+        pub url: String,
+        pub auth: Option<Arc<dyn Authenticator>>,
+        pub explorer: bool,
+        pub explorer_prefix: String,
+    }
+
+    impl CreateOptions {
+        // Defaults to the in-memory stores, no authenticator, Explorer off.
+        pub fn new(
             executor: Arc<ApCoreAgentExecutor>,
-            task_store: Arc<dyn TaskStore>,
-            name: &str,
-            description: &str,
-            version: &str,
-            url: &str,
-            auth: Option<Arc<dyn Authenticator>>,
-            explorer: bool,
-            explorer_prefix: &str,
-        ) -> (Router, AgentCard);
+            name: impl Into<String>,
+            description: impl Into<String>,
+            version: impl Into<String>,
+            url: impl Into<String>,
+        ) -> Self;
+
+        pub fn with_task_store(self, store: Arc<dyn TaskStore>) -> Self;
+        pub fn with_push_config_store(self, store: Arc<dyn PushConfigStore>) -> Self;
+        pub fn with_auth(self, auth: Arc<dyn Authenticator>) -> Self;
+        pub fn with_explorer(self, enabled: bool, prefix: impl Into<String>) -> Self;
     }
     ```
 
@@ -312,7 +331,7 @@ class TransportManager:
 | `message/stream` | `streaming_handler.handle_stream(params, identity)` → `StreamingResponse` |
 | `tasks/get` | `task_manager.get_task(params["id"])` |
 | `tasks/cancel` | `handle_cancel(params["id"])` |
-| `tasks/list` | `task_manager.list_tasks(...)` |
+| `ListTasks` | `task_manager.list_tasks(...)` |
 | `tasks/resubscribe` | `streaming_handler.handle_resubscribe(params)` |
 | `tasks/pushNotificationConfig/set` | `push_manager.set_config(params)` |
 | `tasks/pushNotificationConfig/get` | `push_manager.get_config(params)` |
