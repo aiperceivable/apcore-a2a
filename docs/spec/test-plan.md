@@ -432,6 +432,95 @@ jobs:
 
 ---
 
+#### TC-AGC-009: An ACL approval gate hides a skill from the public card only
+
+| Field | Value |
+|-------|-------|
+| **ID** | TC-AGC-009 |
+| **Priority** | P0 |
+| **SRS Trace** | FR-AGC-003 (criterion 11), FR-AGC-004 (criteria 2, 10) |
+
+**Preconditions:** Registry with `math.add` and `vcs.push`, neither annotated `requires_approval`. Executor with an ACL whose rules are, in order: `{callers: ["*"], targets: ["vcs.push"], effect: "allow", approval: "required"}` then `{callers: ["*"], targets: ["*"], effect: "allow"}`, `default_effect: deny`. Authentication configured.
+
+**Test Steps:**
+1. Fetch the public card from `/.well-known/agent-card.json`.
+2. Assert its skill ids are exactly `["math.add"]` — the ACL-gated skill is withheld on the same terms as an annotated one.
+3. Fetch the extended card as an authenticated caller.
+4. Assert its skill ids are exactly `["math.add", "vcs.push"]`.
+5. Assert the two cards differ.
+
+**Expected Result:** Gated on the public card, present on the extended card.
+
+**Why this case exists:** apcore 0.28.0 (`PROTOCOL_SPEC` §6.1.6) split one ACL verdict into two independent axes and made the legacy boolean `ACL.check` **fail closed** on an approval requirement. A card filter written against that boolean passes step 2 and fails step 4 — it deletes the skill from *both* cards and reports a refusal the ACL never issued. Step 4 is the assertion that forces the structured accessor.
+
+---
+
+#### TC-AGC-010: An ACL denial still hides the skill from both cards
+
+| Field | Value |
+|-------|-------|
+| **ID** | TC-AGC-010 |
+| **Priority** | P0 |
+| **SRS Trace** | FR-AGC-003 (criterion 6), FR-AGC-004 (criterion 10) |
+
+**Preconditions:** Registry with `math.add`. Executor with an ACL of one rule `{callers: ["*"], targets: ["math.add"], effect: "deny"}`, `default_effect: allow`. Authentication configured.
+
+**Test Steps:**
+1. Fetch the public card; assert it carries no skills.
+2. Fetch the extended card as an authenticated caller; assert it carries no skills.
+
+**Expected Result:** Absent from both.
+
+**Why this case exists:** the pair to TC-AGC-009. Reading only the `access` axis must not loosen the authorization one — a denied skill stays invisible however the decision was reached.
+
+---
+
+#### TC-AGC-011: `system.*` is absent from the public card with no ACL configured
+
+| Field | Value |
+|-------|-------|
+| **ID** | TC-AGC-011 |
+| **Priority** | P0 |
+| **SRS Trace** | FR-AGC-003 (criteria 12, 13), FR-AGC-004 (criterion 11) |
+
+**Preconditions:** A registry carrying one user module plus apcore's management namespace, registered by `register_sys_modules` with `sys_modules.events.enabled` so the `system.control.*` write modules are present. **No ACL configured** and no `acl/` directory. Authentication configured.
+
+**Test Steps:**
+1. Fetch the public card; assert its skill ids are exactly the user module — no `system.*` at all.
+2. Repeat with an ACL of one rule `{callers: ["*"], targets: ["*"], effect: "allow"}`; assert the public card is unchanged.
+3. Fetch the extended card as an authenticated caller; assert every registered `system.*` id is present, `system.control.*` included.
+4. Repeat step 3 with an ACL denying `system.*`; assert the extended card carries only the user module.
+
+**Expected Result:** absent from the public card in both ACL states; present on the extended card, and still ACL-filtered there.
+
+**Why this case exists:** the no-ACL state is the default — `ACL.discover()` yields nothing for a missing root in all three languages, deliberately — and it is the one state where every ACL-shaped rule is empty. The `requires_approval` annotation covers only `system.control.*`, so the six read modules would publish the deployment's module inventory, health and usage to any anonymous caller on the auth-exempt `/.well-known/` route. Step 2 is what distinguishes an unconditional rule from one that only looks right because the ACL happened to deny; step 4 is what stops the exclusion becoming an ACL exemption.
+
+---
+
+#### TC-AGC-012: `sys_modules` actually registers, and the warning fires
+
+| Field | Value |
+|-------|-------|
+| **ID** | TC-AGC-012 |
+| **Priority** | P0 |
+| **SRS Trace** | FR-AGC-003 (criterion 12), FR-AGC-007 |
+
+**Preconditions:** A registry with one user module.
+
+**Test Steps:**
+1. Build a server with `sys_modules` enabled; assert `system.*` modules are now in the registry.
+2. Assert none of them is on the public card.
+3. Build a server with `sys_modules` disabled; assert no `system.*` module is registered.
+4. With an executor whose `governance_state().unprotected_control_surface` is `true`, build a server and assert a warning naming the control surface is emitted, that the server still starts, and that neither card changed.
+5. Assert no warning when only the read modules are registered.
+6. Assert an executor that does not expose the accessor is tolerated silently.
+
+**Expected Result:** registration works, the namespace stays off the public card, and the diagnostic fires exactly in the unprotected case.
+
+**Why this case exists:** step 1 pins the defect that made the whole issue latent — `sys_modules` was a silent no-op in all three bindings, so nothing was ever registered to be advertised. Steps 1 and 2 must be asserted together: repairing the registration alone is what opens the hole. Step 3 is the other half of the same defect: a suite that only asserts the `true` case cannot tell "off" from "broken". All three bindings assert step 4's message; the Rust suite captures `tracing` with a thread-local `subscriber::set_default`, which cannot race the other tests in its binary.
+
+---
+
 ### 5.2 TC-SKL: Skill Mapper
 
 ---
@@ -584,7 +673,7 @@ jobs:
 
 ---
 
-#### TC-SKL-009: Annotations are NOT mapped to Skill extensions
+#### TC-SKL-009: Annotations are conveyed as namespaced tags
 
 | Field | Value |
 |-------|-------|
@@ -592,17 +681,19 @@ jobs:
 | **Priority** | P0 |
 | **SRS Trace** | FR-SKL-004 |
 
-**Preconditions:** Module with `annotations = StubAnnotations(readonly=True, destructive=False)`.
+**Preconditions:** Module with `tags = ["filesystem"]` and `annotations = StubAnnotations(readonly=True, idempotent=True, destructive=False)`.
 
 **Test Steps:**
 1. Map descriptor.
-2. Assert the resulting Skill has no `extensions` field (A2A 1.0 `AgentSkill` has no such field).
+2. Assert `skill.tags == ["filesystem", "apcore:readonly", "apcore:idempotent"]` — module tags first, annotations appended in the fixed order `readonly, destructive, idempotent, requires-approval`.
+3. Assert no `apcore:destructive` tag (the flag is false).
+4. Assert the resulting Skill has no `extensions` field (A2A 1.0 `AgentSkill` has no such field, and no `metadata` field either — `tags` is the only carrier available).
 
-**Expected Result:** The Skill carries no annotation/extensions data; annotations are surfaced separately via the Explorer UI's `_inputSchemas` enrichment.
+**Expected Result:** The annotations reach the wire inside a standard `string[]`, so a caller can judge blast radius before invoking and can pair `retryable` with `idempotent`.
 
 ---
 
-#### TC-SKL-010: Modules with None annotations produce no extensions field
+#### TC-SKL-010: Unset annotations produce no tags
 
 | Field | Value |
 |-------|-------|
@@ -610,13 +701,15 @@ jobs:
 | **Priority** | P0 |
 | **SRS Trace** | FR-SKL-004 |
 
-**Preconditions:** Module with `annotations = None`.
+**Preconditions:** Three modules — one with `annotations = None`, one with every flag `False`, one already declaring `apcore:destructive` in its own `tags` alongside `destructive=True`.
 
 **Test Steps:**
-1. Map descriptor.
-2. Assert the resulting Skill has no `extensions` field (A2A 1.0 `AgentSkill` has no such field).
+1. Map each descriptor.
+2. Assert the first two carry no `apcore:`-prefixed tag (absence means "not asserted", never "asserted false").
+3. Assert the third carries `apcore:destructive` exactly once (de-duplication).
+4. Assert none of them has an `extensions` field.
 
-**Expected Result:** No extensions field on the Skill, regardless of annotations.
+**Expected Result:** No spurious or duplicated annotation tags.
 
 ---
 
@@ -880,21 +973,23 @@ schema = {
 
 ---
 
-#### TC-ERR-003: ACLDeniedError maps to -32001 with sanitized message
+#### TC-ERR-003: ACLDeniedError maps to -32040 with sanitized message
 
 | Field | Value |
 |-------|-------|
 | **ID** | TC-ERR-003 |
 | **Priority** | P0 |
-| **SRS Trace** | FR-ERR-001, NFR-SEC-003 |
+| **SRS Trace** | FR-ERR-003, NFR-SEC-001 |
 
 **Test Steps:**
 1. Call `ErrorMapper.to_jsonrpc_error(ACLDeniedError(caller="admin", module="secret.module"))`.
-2. Assert `result.code == -32001`.
-3. Assert `"admin"` NOT in `result.message` (caller info sanitized).
-4. Assert `"secret.module"` NOT in `result.message` (module name sanitized).
+2. Assert `result.code == -32040`.
+3. Assert `result.message == "Access denied"`.
+4. Assert `result.code != -32001` — that code means "unknown or non-owned task id", whose correct client response is the opposite of a refusal's.
+5. Assert `"admin"` NOT in `result.message` (caller info suppressed).
+6. Assert `"secret.module"` NOT in `result.message` (module name suppressed).
 
-**Expected Result:** Code -32001, no internal details in message.
+**Expected Result:** Code -32040 with the fixed message `"Access denied"`. The *class* of refusal is conveyed; the *detail* is not.
 
 ---
 
@@ -1117,13 +1212,84 @@ schema = {
 
 ---
 
+#### TC-ERR-009: ApprovalDeniedError maps to -32041, not the retryable catch-all
+
+| Field | Value |
+|-------|-------|
+| **ID** | TC-ERR-009 |
+| **Priority** | P0 |
+| **SRS Trace** | FR-ERR-009 |
+
+**Test Steps:**
+1. Call `ErrorMapper.to_jsonrpc_error(ApprovalDeniedError(...))` with a message naming the approver and approval id.
+2. Assert `result.code == -32041` and `result.message == "Approval denied"`.
+3. Assert `result.code != -32603` — `"Internal server error"` is the canonical *retryable* failure, and this call was explicitly refused by a human.
+4. Assert the approver identity and approval id are absent from `result.message`.
+
+**Expected Result:** Code -32041, fixed message, no detail.
+
+---
+
+#### TC-ERR-010: ApprovalTimeoutError maps to -32042, distinct from an execution timeout
+
+| Field | Value |
+|-------|-------|
+| **ID** | TC-ERR-010 |
+| **Priority** | P0 |
+| **SRS Trace** | FR-ERR-010 |
+
+**Test Steps:**
+1. Call `ErrorMapper.to_jsonrpc_error(ApprovalTimeoutError(...))`.
+2. Assert `result.code == -32042` and `result.message == "Approval timed out"`.
+3. Assert `result.message != "Execution timeout"` (FR-ERR-005) and `!= "Internal server error"` (FR-ERR-008).
+
+**Expected Result:** Code -32042, fixed message. Unlike a denial, a fresh submission may legitimately be approved.
+
+---
+
+#### TC-ERR-011: APPROVAL_PENDING is not swept into the governance block
+
+| Field | Value |
+|-------|-------|
+| **ID** | TC-ERR-011 |
+| **Priority** | P0 |
+| **SRS Trace** | FR-ERR-009, FR-EXE-002 |
+
+**Test Steps:**
+1. Raise `ApprovalPendingError` carrying an `approval_id` from the executed module.
+2. Assert the task reaches `TASK_STATE_INPUT_REQUIRED`, not `TASK_STATE_REJECTED`.
+3. Assert the status message carries the `approval_id` verbatim.
+4. Assert the mapper does not produce -32040 / -32041 / -32042 for it.
+
+**Expected Result:** A resumable pause, unchanged. `rejected` is terminal; re-coding this would end the conversation.
+
+---
+
+#### TC-ERR-012: disclose_refusal_reason moves the message, never the code
+
+| Field | Value |
+|-------|-------|
+| **ID** | TC-ERR-012 |
+| **Priority** | P1 |
+| **SRS Trace** | FR-ERR-011 |
+
+**Test Steps:**
+1. Map an `ACLDeniedError` with the flag off; assert the fixed `"Access denied"`.
+2. Map the same error with the flag on; assert apcore's own reason reaches the caller.
+3. Assert the code is identical under both settings.
+4. Assert the `carries_caller_detail` partition agrees with the mapper under **both** settings, across every apcore error code.
+
+**Expected Result:** The flag widens the message only. What a refusal *is* does not depend on how much a deployment says about it.
+
+---
+
 #### TC-RTR-004: ACLDeniedError sanitized before propagation
 
 | Field | Value |
 |-------|-------|
 | **ID** | TC-RTR-004 |
 | **Priority** | P0 |
-| **SRS Trace** | FR-ERR-001, NFR-SEC-003 |
+| **SRS Trace** | FR-ERR-003, NFR-SEC-001 |
 
 **Preconditions:** `StubExecutor` raises `ACLDeniedError(caller="user:bob", module="admin.delete")`.
 
@@ -2091,9 +2257,9 @@ schema = {
 
 **Test Steps:**
 1. POST `message/send` with admin JWT (`roles: ["admin"]`). Assert task completed.
-2. POST `message/send` with viewer JWT (`roles: ["viewer"]`). Assert `error.code == -32001`.
+2. POST `message/send` with viewer JWT (`roles: ["viewer"]`). Assert the task reaches `TASK_STATE_REJECTED` with the message `"Access denied"` (on the `message/send` path the response is a JSON-RPC `result`, so no error code is emitted); on a `tasks/*` path assert `error.code == -32040`.
 
-**Expected Result:** Admin succeeds, viewer gets ACL error.
+**Expected Result:** Admin succeeds, viewer gets an authorization refusal it can recognize as one.
 
 ---
 
@@ -2393,15 +2559,16 @@ schema = {
 |-------|-------|
 | **ID** | TC-SEC-003 |
 | **Priority** | P0 |
-| **SRS Trace** | NFR-SEC-003, FR-ERR-001 |
+| **SRS Trace** | NFR-SEC-001, FR-ERR-003 |
 
 **Preconditions:** Executor raises `ACLDeniedError(caller="service-account-db-writer", module="admin.users.delete")`.
 
 **Test Steps:**
 1. POST `message/send` for `admin.users.delete` with insufficient permissions.
-2. Parse response — assert `result.status.state == "TASK_STATE_FAILED"` or `error.code == -32001`.
+2. Parse response — assert `result.status.state == "TASK_STATE_REJECTED"` (or `error.code == -32040` on a `tasks/*` path).
 3. Assert `"service-account-db-writer"` NOT in response body.
 4. Assert `"admin.users.delete"` NOT in response body.
+5. Assert `"Task not found"` NOT in response body — the refusal must not impersonate a different failure.
 
 **Expected Result:** Error returned with no sensitive info.
 
@@ -2475,7 +2642,7 @@ fixtures verify they stay identical to each other.
 | Fixture | Locks | Related test cases |
 |---|---|---|
 | `jwt_claim_coercion.json` (A-AUTH) | JWT claim → `Identity` coercion (Rust-strict) | TC-AUT-001–004 |
-| `agent_card.json` (A-CARD) | Agent Card shapes incl. `securitySchemes` oneof, `securityRequirements: []` | TC-AGC-001–004, TC-SKL-009/010 |
+| `agent_card.json` (A-CARD) | Agent Card shapes incl. `securitySchemes` oneof, `securityRequirements: []`, public/extended skill visibility, `system.*` namespace | TC-AGC-001–004, TC-AGC-009/010/011, TC-SKL-009/010 |
 | `error_mapping.json` (A-ERR) | exception → JSON-RPC code + sanitized message | TC-ERR-001–005, TC-SEC-003/004 |
 | `skill_resolution.json` (A-SKILL) | missing/invalid `skillId` & unparseable parts → FAILED task | TC-INT-005, TC-PRT-005/006 |
 | `streaming_events.json` (A-STREAM) | SSE sequence incl. terminal `lastChunk` marker, no `final` flag | TC-STR-002/003/004, TC-INT-002 |
@@ -2655,13 +2822,15 @@ TASKS_CANCEL_REQUEST = lambda task_id: {
 | FR-SRV-005 | Graceful shutdown | TC-SRV-008 (future) |
 | FR-AGC-001 | Agent Card from Registry metadata | TC-AGC-001, TC-AGC-002 |
 | FR-AGC-002 | Capabilities computed | TC-AGC-003, TC-AGC-004 |
-| FR-AGC-003 | Serve Agent Card at /.well-known/agent-card.json | TC-AGC-005, TC-AGC-006 |
-| FR-AGC-004 | Extended Agent Card | TC-AGC-007 |
+| FR-AGC-003 | Serve Agent Card at /.well-known/agent-card.json | TC-AGC-005, TC-AGC-006, TC-AGC-009, TC-AGC-010, TC-AGC-011, TC-AGC-012 |
+| FR-AGC-004 | Extended Agent Card (per-identity) | TC-AGC-007, TC-AGC-009, TC-AGC-010, TC-AGC-011 |
+| FR-AGC-006 | No capability advertised that is not served | TC-AGC-007 |
+| FR-AGC-007 | Warn when an unprotected control surface is served | TC-AGC-012 |
 | FR-AGC-005 | Regenerate Agent Card on changes | TC-AGC-008 |
 | FR-SKL-001 | Module → Skill mapping | TC-SKL-001, TC-SKL-002, TC-SKL-003, TC-SKL-004, TC-SKL-005 |
 | FR-SKL-002 | Examples mapping | TC-SKL-006 |
 | FR-SKL-003 | Input/output modes | TC-SKL-007, TC-SKL-008 |
-| FR-SKL-004 | Annotations as extensions | TC-SKL-009, TC-SKL-010 |
+| FR-SKL-004 | Annotations as namespaced Skill tags | TC-SKL-009, TC-SKL-010 |
 | FR-MSG-001 | message/send synchronous | TC-INT-001, TC-INT-005 |
 | FR-MSG-002 | message/stream SSE | TC-STR-001–006, TC-INT-002, TC-E2E-002 |
 | FR-MSG-003 | Parse Parts to module input | TC-PRT-003–006 |
@@ -2675,6 +2844,11 @@ TASKS_CANCEL_REQUEST = lambda task_id: {
 | FR-EXE-001 | Execution routing | TC-RTR-001–005 |
 | FR-EXE-003 | Schema converter | TC-SCH-001–005 |
 | FR-ERR-001 | Error mapping | TC-ERR-001–005 |
+| FR-ERR-003 | ACL denial → -32040 "Access denied" | TC-ERR-003, TC-RTR-004, TC-SEC-003 |
+| FR-ERR-009 | Approval denial → -32041 | TC-ERR-009 |
+| FR-ERR-010 | Approval timeout → -32042 | TC-ERR-010 |
+| FR-ERR-011 | disclose_refusal_reason | TC-ERR-012 |
+| FR-ERR-012 | Governance refusal → TASK_STATE_REJECTED | TC-ERR-009–011, TC-SEC-003 |
 | FR-CLI-001 | Client agent discovery | TC-CLI-001, TC-CLI-002, TC-INT-006 |
 | FR-CLI-002 | Client send_message | TC-CLI-003, TC-CLI-006, TC-INT-006 |
 | FR-CLI-003 | Client stream_message | TC-CLI-004 |
@@ -2737,11 +2911,11 @@ TASKS_CANCEL_REQUEST = lambda task_id: {
 
 | Category | Count |
 |----------|-------|
-| TC-AGC (Agent Card) | 8 |
+| TC-AGC (Agent Card) | 12 |
 | TC-SKL (Skill Mapper) | 10 |
 | TC-SCH (Schema Converter) | 5 |
 | TC-PRT (Part Converter) | 6 |
-| TC-ERR (Error Mapper) | 5 |
+| TC-ERR (Error Mapper) | 9 |
 | TC-SRV (Server Factory) | 7 |
 | TC-RTR (Execution Router) | 5 |
 | TC-TSK (Task Manager) | 9 |
@@ -2757,7 +2931,7 @@ TASKS_CANCEL_REQUEST = lambda task_id: {
 | TC-E2E (End-to-End) | 4 |
 | TC-PERF (Performance) | 5 |
 | TC-SEC (Security) | 6 |
-| **Total** | **118** |
+| **Total** | **121** |
 
 ---
 

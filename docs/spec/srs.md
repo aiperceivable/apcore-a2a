@@ -357,6 +357,7 @@ apcore-a2a is the second adapter in the planned family. It depends on the `apcor
 2. `capabilities.pushNotifications` SHALL be `true` if push notifications are enabled via `serve(registry, push_notifications=True)`.
 3. The task store SHALL record state-transition history when it supports history recording. (A2A 1.0 removed the 0.3 `capabilities.stateTransitionHistory` flag; history is no longer advertised as a capability.)
 4. If no modules support streaming AND push notifications are disabled AND history is not supported, `capabilities` SHALL still be present with all fields set to `false`.
+5. `capabilities.extendedAgentCard` SHALL be `true` only when the binding both (a) has an `Authenticator` configured and (b) serves the extended-card endpoint (FR-AGC-004). It SHALL NOT be derived from the presence of an authenticator alone.
 
 ---
 
@@ -372,12 +373,36 @@ apcore-a2a is the second adapter in the planned family. It depends on the `apcor
 
 **Rationale:** `/.well-known/agent-card.json` is the A2A standard discovery endpoint. All A2A clients expect to find the Agent Card at this URL.
 
+**Skill visibility.** The public card SHALL advertise exactly the skills an **unauthenticated** caller could actually invoke: every registered skill, minus those the configured ACL denies to the anonymous principal, minus those the ACL gates behind a human for that principal, minus those annotated `requires_approval`. This is a static computation — it resolves one identity, so it is performed once when the card is built and served from memory to every anonymous caller, and it does not drive the ACL audit sink per request.
+
+**The two axes.** apcore resolves a call to **two independent results** (apcore `PROTOCOL_SPEC` §6.1.6): may this caller reach this target at all, and must this particular call be put to a human first. Bindings SHALL read them apart, via the structured accessor (`ACL.check_access` / `ACL.checkAccess`), and SHALL NOT filter a card on the legacy boolean (`ACL.check`). That boolean folds the two together and **fails closed on an approval requirement** — the correct reading for a caller about to execute, and the wrong one for a discovery surface, where it deletes a skill from the extended card for the one reason FR-AGC-004 says to keep it. The authorization axis decides *visibility*; the approval axis decides only *which surface*.
+
+The two sources of an approval gate — the module's `requires_approval` annotation and an ACL rule carrying `approval: required` — SHALL be composed by **union**, as apcore §6.9 composes them. Since apcore 0.28.0 the annotation is one source among several and describes the *module* rather than the call, so a binding that reads the annotation alone would leave on the public card a skill an anonymous caller cannot in fact just call.
+
+The ACL SHALL be consulted with **no arguments projection**, because a card is discovery and there is no call site yet. An `arguments` condition (apcore §6.1.7) is therefore unevaluable, so a rule carrying one neither denies nor grants — but an `allow` rule's `approval: required` stays *pending* and composes with whatever grants (apcore §6.1.1 rule 5). A skill gated only for some argument shapes therefore reports an approval requirement here, which is the honest discovery-time answer and the one that keeps such a skill off the public card.
+
+**When no ACL is configured.** The ACL subtraction is then empty, and the remaining rules stand alone: the public card is every registered skill minus `system.*` minus those annotated `requires_approval`. This is stated rather than left to follow, because it is the case the ACL-shaped rules do not reach and the one every deployment without an `acl/` directory is in — `ACL.discover()` yields nothing for a missing root in all three languages, deliberately, so "no ACL at all" is the default rather than an edge case. A binding MUST NOT treat a missing ACL as permission to advertise everything.
+
+**The management namespace is never on the public card.** apcore reserves `system.*` for the runtime's own management modules (apcore `PROTOCOL_SPEC` §6.7): `system.health.*`, `system.usage.*` and `system.manifest.*` when `sys_modules` is enabled, plus `system.control.*` when `sys_modules.events` is also enabled. Skills whose module id is in that namespace SHALL be absent from the public card **unconditionally** — independent of ACL state, of the `requires_approval` annotation, and of how `sys_modules` is configured. They remain eligible for the extended card (FR-AGC-004), filtered per identity like any other skill.
+
+**Rationale (management namespace):** the public card answers "what may *anyone* call", and a management plane is not a discovery surface. Every ACL-shaped rule above is empty in the no-ACL case, and the annotation covers only `system.control.*` — leaving the six read modules, which enumerate the deployment's module inventory (`system.manifest.*`), its health and its usage, published by id, name, description and full input schema to any anonymous caller on the auth-exempt `/.well-known/` route. Keying on the namespace rather than on a governance predicate is what makes the rule hold when there is no governance to read: apcore identifies the surface by that prefix itself, in `Executor.governance_state()`, so this conveys apcore's own boundary rather than inventing one. It is deliberately **not** an error to serve such a deployment — refusing to build the card would break a running deployment on upgrade, and the binding cannot know the operator's intent — but see FR-AGC-007 for the signal that replaces refusal.
+
+**Rationale (visibility):** apcore's ACL is the authority on who may invoke what, and the discovery surface SHALL reflect that authority rather than ignore it. A card that advertises, by id, name, description and full input schema, a module the ACL denies to everyone is publishing a capability catalogue to any anonymous caller — the `/.well-known/` route is auth-exempt by design, so no credential stands in the way. Resolving the anonymous identity once, rather than per caller, is what keeps this affordable on an unauthenticated endpoint: a per-caller filter would let any anonymous client drive `len(skills)` governance audit writes per request at arbitrary rate. Per-caller filtering belongs on the extended card (FR-AGC-004), where the caller is authenticated.
+
 **Acceptance Criteria:**
 1. `GET /.well-known/agent-card.json` SHALL return HTTP 200 with `Content-Type: application/json`.
 2. The response body SHALL be a valid JSON document conforming to the A2A 1.0 Agent Card schema.
 3. The response SHALL include `Cache-Control: max-age=300` header (5-minute cache).
 4. The endpoint SHALL NOT require authentication.
 5. The response time SHALL be less than 10ms (p99) under normal load (pre-computed card served from memory).
+6. When an ACL is configured, a skill the ACL denies to the anonymous principal SHALL be absent from the public card.
+7. A skill whose module is annotated `requires_approval` SHALL be absent from the public card, whether or not an ACL is configured.
+8. When no ACL is configured, the public card SHALL contain every registered skill except those annotated `requires_approval`.
+9. The filter SHALL be applied once at card-build time. Serving the public card SHALL NOT invoke the ACL per request, and SHALL NOT emit a governance audit entry per request.
+10. The three bindings SHALL agree skill-for-skill on the public card given the same registry and ACL.
+11. A skill the ACL **allows** to the anonymous principal but gates behind an approval (`approval: required`) SHALL be absent from the public card, on the same terms as an annotated one.
+12. A skill whose module id begins with `system.` SHALL be absent from the public card unconditionally — with or without an ACL, with or without a `requires_approval` annotation, under either `sys_modules` opt-in.
+13. With no ACL configured, the public card SHALL be every registered skill minus `system.*` minus those annotated `requires_approval`. A binding SHALL NOT return the unfiltered card on the grounds that there is no ACL to consult.
 
 ---
 
@@ -389,17 +414,22 @@ apcore-a2a is the second adapter in the planned family. It depends on the `apcor
 | **Priority** | P1 |
 | **PRD Trace** | FR-014 |
 
-**Description:** The system SHALL serve an extended Agent Card at an authenticated endpoint that includes additional Skills not visible on the public Agent Card.
+**Description:** The system SHALL serve an extended Agent Card at an authenticated endpoint carrying the skills the **authenticated caller** may invoke — resolved against that caller's own identity — which is a superset of the public card whenever the caller has more access than an anonymous one.
 
-**Rationale:** Modules with ACL restrictions or `requires_approval` annotations should only be discoverable by authenticated agents to prevent information leakage about protected capabilities.
+**Rationale:** The public card answers "what may anyone call"; the extended card answers "what may *you* call". Resolving the ACL against the authenticated identity is the strictly more accurate answer, and it is affordable here precisely because this endpoint requires credentials: the audit-sink amplification that rules per-caller filtering out on `/.well-known/` (FR-AGC-003) is bounded by authentication, and the per-identity result is memoized. Approval-gated skills appear here — an approval gate is a prompt the caller can satisfy, not a refusal — which is what gives the extended card content to carry and `capabilities.extendedAgentCard` something to mean. Only the **authorization** axis of the ACL decision filters this card (see FR-AGC-003, "The two axes"): dropping a skill because it needs a human would report a refusal the ACL never issued, and would leave the caller unable to learn that a capability it holds exists at all.
 
 **Acceptance Criteria:**
-1. `GET /agent/authenticatedExtendedCard` SHALL return an extended Agent Card when valid authentication is provided.
-2. The extended card SHALL include all public Skills plus Skills for modules marked with `requires_approval` annotation or ACL restrictions.
+1. `GET /agent/authenticatedExtendedCard` (JSON-RPC method `agent/getAuthenticatedExtendedCard`) SHALL return an extended Agent Card when valid authentication is provided.
+2. The extended card SHALL contain every skill the configured ACL permits to the authenticated caller, including skills gated behind an approval — whether the gate comes from the module's `requires_approval` annotation or from an ACL rule carrying `approval: required`.
 3. The endpoint SHALL return HTTP 401 without valid credentials when authentication is configured.
 4. The extended card SHALL declare all security schemes the agent supports.
 5. The appropriate Agent Card (public vs extended) SHALL be selected by the caller's authentication status. In the SDK-backed (Python/TypeScript) implementations this card-fetch RPC is provided by the underlying A2A SDK request handler, so it is not separately listed in this project's JSON-RPC dispatch table.
-6. When authentication is not configured, the extended endpoint SHALL return HTTP 404.
+6. When authentication is not configured, the extended endpoint SHALL return HTTP 404 and `capabilities.extendedAgentCard` SHALL be `false`.
+7. Every binding that advertises `capabilities.extendedAgentCard == true` SHALL serve this endpoint. Advertising the capability without serving it is a conformance failure (FR-AGC-006).
+8. The per-caller filter result SHALL be memoized per identity with a bounded cache, so a fixed set of callers cannot grow it without limit.
+9. The extended card SHALL NOT be a verbatim copy of the public card when the authenticated caller has access to any skill the public card omits.
+10. A skill the ACL **denies** the authenticated caller SHALL be absent, and a skill it allows behind an approval SHALL be present. Filtering on the legacy boolean makes these two indistinguishable and is a conformance failure.
+11. A `system.*` skill SHALL be eligible for the extended card, filtered per identity like any other skill. The namespace exclusion belongs to the public card alone (FR-AGC-003 criterion 12): an authenticated management agent that the ACL permits must still be able to discover the surface it is entitled to drive.
 
 ---
 
@@ -420,6 +450,49 @@ apcore-a2a is the second adapter in the planned family. It depends on the `apcor
 2. When a module is removed via `registry.unregister()`, the Agent Card SHALL exclude the removed skill within 1 second.
 3. Agent Card regeneration SHALL be thread-safe and SHALL NOT block concurrent request handling.
 4. The Agent Card version or a change identifier SHALL be updated on each regeneration.
+
+---
+
+#### FR-AGC-006: Advertise no capability the binding does not serve
+
+| Field | Value |
+|-------|-------|
+| **ID** | FR-AGC-006 |
+| **Priority** | P0 |
+| **PRD Trace** | FR-002 |
+
+**Description:** Every flag the system sets in `AgentCard.capabilities` SHALL correspond to behaviour the binding actually implements.
+
+**Rationale:** A2A §3.2.x states that the extended-card endpoint "is available only if `AgentCard.capabilities.extendedAgentCard` is `true`", which entitles a client to read the flag and call the method. A binding that advertises the flag and answers method-not-found has published a contract it does not honour, and a binding that answers with a verbatim copy of the public card has published one that means nothing. Either is worse than not advertising it: a client cannot distinguish "no extra skills exist" from "this server is broken".
+
+**Acceptance Criteria:**
+1. `capabilities.extendedAgentCard == true` SHALL imply the extended-card endpoint is routed and returns a card (FR-AGC-004).
+2. `capabilities.pushNotifications == true` SHALL imply the `tasks/pushNotificationConfig/*` methods are dispatched.
+3. `capabilities.streaming == true` SHALL imply `message/stream` is dispatched.
+4. A conformance fixture SHALL assert, for each binding, that every advertised capability has a served counterpart.
+
+---
+
+#### FR-AGC-007: Warn when an unprotected control surface is served
+
+| Field | Value |
+|-------|-------|
+| **ID** | FR-AGC-007 |
+| **Priority** | P1 |
+| **PRD Trace** | FR-002 |
+
+**Description:** At server construction, the system SHALL read apcore's `Executor.governance_state()` (`governanceState()` in TypeScript) and, when `unprotected_control_surface` is `true`, emit a warning naming the condition. The system SHALL NOT refuse to start, and SHALL NOT alter the card on account of the flag.
+
+**Rationale:** `system.control.*` modules are annotated `requires_approval`, but apcore's approval gate warns once and continues when no `ApprovalHandler` is configured, failing closed only under `ExecutionPolicy(strict=True)`. So a deployment with `sys_modules.events` enabled, no `acl/` directory and no approval handler has write modules that nothing gates — and FR-AGC-003 criterion 12 removes them from the *card* without removing them from the *dispatch table*. Visibility and invocability are separate questions with separate answers, and the card rule must not be mistaken for a fix to the second.
+
+`governance_state()` is the accessor apcore added for exactly this (apcore `PROTOCOL_SPEC` §6.6.5). It answers "is a gate *engaging*", not "is an ACL *attached*" — the ACL and approval gates are pipeline *steps*, and the `internal`, `testing` and `minimal` strategies remove them, so an executor can hold an ACL that no step ever consults. Re-deriving the question per binding from the raw `acl` / `approval_handler` fields would answer the wrong one, and only apcore-rust exposes those fields anyway. apcore made the accessor a **pure read** and left the reaction to the caller, naming "a serve-time adapter may warn or refuse" as the two options; warning is the reaction this project takes, for the reason FR-AGC-003 gives for not refusing.
+
+**Acceptance Criteria:**
+1. Server construction SHALL call `governance_state()` exactly once and SHALL NOT let a failure in it prevent the server from starting.
+2. When `unprotected_control_surface` is `true`, a warning SHALL be emitted that names the control surface and the absent gate.
+3. When it is `false`, no warning SHALL be emitted.
+4. The flag SHALL NOT change the contents of either card, the dispatch table, or any error code.
+5. An executor that does not expose the accessor SHALL be tolerated silently — the reaction is a diagnostic, not a dependency.
 
 ---
 
@@ -491,7 +564,7 @@ apcore-a2a is the second adapter in the planned family. It depends on the `apcor
 
 ---
 
-#### FR-SKL-004: Surface module annotations via Explorer enrichment
+#### FR-SKL-004: Convey module annotations as namespaced Skill tags
 
 | Field | Value |
 |-------|-------|
@@ -499,14 +572,29 @@ apcore-a2a is the second adapter in the planned family. It depends on the `apcor
 | **Priority** | P0 |
 | **PRD Trace** | FR-003 |
 
-**Description:** The system SHALL NOT include apcore module annotations as A2A Skill extensions. The A2A 1.0 `AgentSkill` type has no `extensions` field, so annotations SHALL instead be surfaced through the Explorer UI's `_inputSchemas` enrichment.
+**Description:** The system SHALL convey apcore's behavioral annotations `readonly`, `destructive`, `idempotent` and `requires_approval` on the generated A2A Skill as namespaced entries in the standard `tags` field, using the reserved `apcore:` prefix. Annotations SHALL NOT be emitted as Skill `extensions`.
 
-**Rationale:** A2A 1.0 `AgentSkill` has no `extensions` field; the previously planned `extensions.apcore.annotations` mechanism is not representable. Annotations (readonly, destructive, etc.) remain available to apcore-aware tooling via the Explorer enrichment without polluting the standard Agent Card.
+**Rationale:** apcore models whether a module is read-only, destructive, idempotent or approval-gated, and a transport binding's job is to convey that model, not to drop it. The Agent Card is the discovery surface: it carries the schema, description and examples — enough for a caller to *construct* a call, and without the annotations not enough to judge whether making it is safe. For a host that maps arbitrary local commands onto skills, "is this destructive" is not a nuance.
+
+It is also what makes retry semantics usable. `retryable` is a property of the *error*; whether a retry is safe is a property of the *operation*. `MODULE_TIMEOUT` is retryable for a read and dangerous for a non-idempotent mutation, where a timeout leaves the caller unable to know whether the effect already happened. apcore resolves this internally with exactly that two-factor rule; a caller that receives the error half without the operation half cannot reproduce the decision.
+
+`tags` is the carrier because it is the only one available. A2A 1.0 `AgentSkill` is `{id, name, description, tags, examples, inputModes, outputModes, securityRequirements}` — there is no `extensions` field and no `metadata` field, and in the Python binding the type is generated from the A2A protobuf schema, so a vendor member cannot be added at all. The `apcore:` prefix keeps annotations from colliding with a module's own tags, which share the same flat namespace, and makes them trivially filterable by a client that does not care.
+
+Only `true` flags are emitted, matching how the apcore MCP binding maps the same annotations onto optional `readOnlyHint` / `destructiveHint` / `idempotentHint`. Absence of a tag therefore means "not asserted", not "asserted false". `open_world`, `streaming`, `cacheable`, `paginated` and `discoverable` are deliberately **not** emitted: the first is advisory rather than safety-bearing, and the rest are either already represented elsewhere on the card (`capabilities.streaming`) or are registry-internal.
+
+`apcore:requires-approval` conveys the module's **annotation**, which since apcore 0.28.0 (`PROTOCOL_SPEC` §6.9, apcore#110) is one source of an approval gate among several: an ACL rule carrying `approval: required`, an `ExecutionPolicy` override or `gate_destructive` can require approval for a particular call on a module whose annotation says `false`. The tag therefore reads "this module always needs a human", and its absence reads "the module does not declare one" — not "this call will run unattended". A client that needs the per-call answer asks apcore, via `validate()` (§7.9.5), which is the accessor that describes a *call*; the card describes a *module*. This is also why the ACL's own approval requirement is expressed on the card by **withholding the skill from the public card** (FR-AGC-003 criterion 11) rather than by synthesising this tag: the tag names an annotation, and one name for two different statements is how the distinction gets lost.
 
 **Acceptance Criteria:**
 1. The generated A2A Skill SHALL NOT contain any `extensions` field (the field does not exist on `AgentSkill`).
-2. Module annotations (`readonly`, `destructive`, `idempotent`, `requires_approval`, `open_world`) SHALL be exposed via the Explorer UI's `_inputSchemas` enrichment, not on the Skill.
-3. Standard A2A clients SHALL be able to parse the Agent Card without encountering any apcore-specific annotation fields.
+2. A module whose descriptor carries `annotations.readonly == true` SHALL produce a Skill whose `tags` contains `apcore:readonly`.
+3. A module whose descriptor carries `annotations.destructive == true` SHALL produce a Skill whose `tags` contains `apcore:destructive`.
+4. A module whose descriptor carries `annotations.idempotent == true` SHALL produce a Skill whose `tags` contains `apcore:idempotent`.
+5. A module whose descriptor carries `annotations.requires_approval == true` SHALL produce a Skill whose `tags` contains `apcore:requires-approval`.
+6. A flag that is `false`, absent, or whose descriptor carries no `annotations` object at all SHALL produce no corresponding tag.
+7. Annotation tags SHALL be appended after the module's resolved tags (FR-SKL-001), SHALL preserve that resolution — including the §5.13 `display.tags` override — and SHALL be de-duplicated against it.
+8. Annotation tags SHALL be emitted in the fixed order `readonly`, `destructive`, `idempotent`, `requires-approval`, so the card is byte-identical across the three bindings.
+9. Standard A2A clients SHALL be able to parse the Agent Card without encountering any apcore-specific *field*; the annotations travel inside a standard `string[]`.
+10. The Explorer UI's `_inputSchemas` enrichment SHALL continue to expose the full annotation set, including the flags not promoted to tags.
 
 ---
 
@@ -670,8 +758,8 @@ apcore-a2a is the second adapter in the planned family. It depends on the `apcor
 1. The system SHALL support exactly seven task states: `submitted`, `working`, `completed`, `failed`, `canceled`, `rejected`, `input_required`.
 2. Valid transitions SHALL be enforced:
    - `submitted` --> `working`, `canceled`, `failed`, `rejected`
-   - `working` --> `completed`, `failed`, `canceled`, `input_required`
-   - `input_required` --> `working`, `canceled`, `failed`
+   - `working` --> `completed`, `failed`, `canceled`, `rejected`, `input_required`
+   - `input_required` --> `working`, `canceled`, `failed`, `rejected`
 3. Terminal states (`completed`, `failed`, `canceled`, `rejected`) SHALL NOT allow any outbound transitions.
 4. Attempted invalid transitions SHALL be logged at ERROR level and SHALL NOT be exposed to the client.
 5. Attempted invalid transitions SHALL raise an internal `InvalidStateTransitionError` that is caught and converted to JSON-RPC error -32603.
@@ -892,7 +980,7 @@ apcore-a2a is the second adapter in the planned family. It depends on the `apcor
 
 ---
 
-#### FR-ERR-003: Map ACLDeniedError to JSON-RPC -32001 with detail suppression
+#### FR-ERR-003: Map ACLDeniedError to JSON-RPC -32040 with detail suppression
 
 | Field | Value |
 |-------|-------|
@@ -900,16 +988,20 @@ apcore-a2a is the second adapter in the planned family. It depends on the `apcor
 | **Priority** | P0 |
 | **PRD Trace** | FR-007 |
 
-**Description:** The system SHALL map apcore `ACLDeniedError` to JSON-RPC error code -32001 (TaskNotFound) with all security-sensitive details suppressed.
+**Description:** The system SHALL map apcore `ACLDeniedError` to JSON-RPC error code -32040 (Access denied) with all security-sensitive details suppressed.
 
-**Rationale:** ACL errors must not leak information about the existence of protected modules, caller identities, or ACL rules. Returning TaskNotFound prevents information disclosure.
+**Rationale:** apcore distinguishes an authorization refusal from every other failure, and the transport binding SHALL convey that distinction rather than flatten it. A2A specification §13.2 requires a server to *return an authorization error* when the caller lacks permission (MUST), to indicate what was refused without leaking protected resources (SHOULD), and forbids *revealing the existence of resources* the caller may not access (MUST NOT). The MUST NOT constrains the **detail**, not the **class**: a fixed `"Access denied"` carrying no caller id, no target id and no rule detail discloses nothing about what exists — a caller that named a skill already held that id — while still telling an agent to stop rather than retry.
+
+Code -32040 is a JSON-RPC implementation-defined server error (the §13.2 "JSON-RPC custom error" example), chosen from the -32000..-32099 range above A2A 1.0's reserved -32001..-32009 so it cannot collide with a future reserved code. Reserving -32001 for `tasks/*` keeps "unknown task id" and "task belongs to another owner" deliberately indistinguishable without also absorbing authorization, which has the opposite correct client response: an unknown task id invites a re-fetch or re-send, an authorization refusal must stop the caller.
 
 **Acceptance Criteria:**
-1. `ACLDeniedError` SHALL produce JSON-RPC error with code -32001.
-2. The error message SHALL be a generic "Task not found" (not "Access denied").
-3. The error SHALL NOT include caller_id, target_id, or ACL rule details in any field.
-4. The JSON-RPC error object is `{code, message}` only; no `data` field is emitted in v0.4 (the true error type is not exposed).
+1. `ACLDeniedError` SHALL produce JSON-RPC error with code -32040.
+2. The error message SHALL be a fixed `"Access denied"`, and SHALL NOT be `"Task not found"`.
+3. The error SHALL NOT include caller_id, target_id, or ACL rule details in any field, unless `disclose_refusal_reason` is enabled (FR-ERR-011).
+4. The JSON-RPC error object is `{code, message}` only; no `data` field is emitted.
 5. The actual ACL denial SHALL be logged at WARNING level with full details for server-side debugging.
+6. On the task-status surface the task SHALL reach `TASK_STATE_REJECTED`, not `TASK_STATE_FAILED` (FR-ERR-012).
+7. Code -32040 SHALL NOT be produced for any cause other than an authorization refusal, and `tasks/*` SHALL continue to report an unknown or non-owned task id as -32001 `"Task not found"`.
 
 ---
 
@@ -1003,11 +1095,95 @@ apcore-a2a is the second adapter in the planned family. It depends on the `apcor
 **Rationale:** Unknown exceptions must never leak internal details. A generic error message ensures security while still indicating a server-side failure.
 
 **Acceptance Criteria:**
-1. Any exception not matched by FR-ERR-001 through FR-ERR-007 SHALL produce JSON-RPC error -32603.
+1. Any exception not matched by FR-ERR-001 through FR-ERR-007 or FR-ERR-009 through FR-ERR-010 SHALL produce JSON-RPC error -32603.
 2. The error message SHALL be "Internal server error" (the same fixed generic message used for `ModuleExecuteError` per FR-ERR-004, so unrecognized and execution errors are indistinguishable to the caller).
 3. The error SHALL NOT include stack traces, file paths, or internal variable values.
 4. The JSON-RPC error object is `{code, message}` only; no `data` field is emitted in v0.4.
 5. The actual exception SHALL be logged at ERROR level with full stack trace for server-side debugging.
+
+---
+
+#### FR-ERR-009: Map ApprovalDeniedError to JSON-RPC -32041
+
+| Field | Value |
+|-------|-------|
+| **ID** | FR-ERR-009 |
+| **Priority** | P0 |
+| **PRD Trace** | FR-007 |
+
+**Description:** The system SHALL map apcore `ApprovalDeniedError` (`.code == "APPROVAL_DENIED"`) to JSON-RPC error code -32041 with the fixed message `"Approval denied"`.
+
+**Rationale:** A human explicitly refused the call. Left unmapped it falls into the FR-ERR-008 catch-all and is reported as -32603 `"Internal server error"` — the canonical *retryable* failure — which does not merely permit a retry loop but invites one. apcore models the refusal as its own error code; the binding SHALL carry that distinction to the caller. The fixed message discloses nothing: it names no approver, no policy and no target.
+
+**Acceptance Criteria:**
+1. `ApprovalDeniedError` SHALL produce JSON-RPC error with code -32041.
+2. The error message SHALL be the fixed string `"Approval denied"`.
+3. The error SHALL NOT include approver identity, approval id, policy detail, or target module id, unless `disclose_refusal_reason` is enabled (FR-ERR-011).
+4. The JSON-RPC error object is `{code, message}` only; no `data` field is emitted.
+5. On the task-status surface the task SHALL reach `TASK_STATE_REJECTED` (FR-ERR-012).
+6. This requirement SHALL NOT affect `APPROVAL_PENDING`, which is governed by FR-EXE-002 and stays a resumable `TASK_STATE_INPUT_REQUIRED` carrying its message verbatim.
+
+---
+
+#### FR-ERR-010: Map ApprovalTimeoutError to JSON-RPC -32042
+
+| Field | Value |
+|-------|-------|
+| **ID** | FR-ERR-010 |
+| **Priority** | P0 |
+| **PRD Trace** | FR-007 |
+
+**Description:** The system SHALL map apcore `ApprovalTimeoutError` (`.code == "APPROVAL_TIMEOUT"`) to JSON-RPC error code -32042 with the fixed message `"Approval timed out"`.
+
+**Rationale:** An approval that expired without an answer is a governance outcome, not a server fault. It is distinct from `APPROVAL_DENIED` — nobody refused, nobody answered — and apcore gives it a distinct code, so the binding SHALL preserve the distinction. It is also distinct from `MODULE_TIMEOUT` (FR-ERR-005), which is an execution deadline: a re-submission may legitimately be approved, whereas a denial will not be.
+
+**Acceptance Criteria:**
+1. `ApprovalTimeoutError` SHALL produce JSON-RPC error with code -32042.
+2. The error message SHALL be the fixed string `"Approval timed out"`.
+3. The message SHALL NOT be `"Execution timed out"` (FR-ERR-005) nor `"Internal server error"` (FR-ERR-008).
+4. The error SHALL NOT include approver identity, approval id, timeout configuration, or target module id, unless `disclose_refusal_reason` is enabled (FR-ERR-011).
+5. On the task-status surface the task SHALL reach `TASK_STATE_REJECTED` (FR-ERR-012).
+
+---
+
+#### FR-ERR-011: Optional disclosure of a governance refusal reason
+
+| Field | Value |
+|-------|-------|
+| **ID** | FR-ERR-011 |
+| **Priority** | P1 |
+| **PRD Trace** | FR-007 |
+
+**Description:** The system SHALL provide a configuration flag `disclose_refusal_reason` (default `false`) that, when enabled, forwards apcore's own sanitized message for the three governance refusal codes (`ACL_DENIED`, `APPROVAL_DENIED`, `APPROVAL_TIMEOUT`) in place of the fixed per-class string.
+
+**Rationale:** The *class* of a refusal is always conveyed (FR-ERR-003, FR-ERR-009, FR-ERR-010); the *detail* is a deployment choice. A server whose callers are its own agents wants apcore's reason — `Access denied: caller '…' cannot access module '…'` — which is what the apcore MCP binding reports today, so an operator comparing the two transports otherwise sees the reason on one and a fixed string on the other. A server facing untrusted callers keeps the default and discloses nothing.
+
+**Acceptance Criteria:**
+1. The flag SHALL default to `false`; with the default, FR-ERR-003 / FR-ERR-009 / FR-ERR-010 behave exactly as specified there.
+2. When `true`, the message for those three codes SHALL be apcore's own message passed through the same sanitizer applied to every other forwarded message (NFR-SEC-001 path stripping and truncation).
+3. The JSON-RPC error code SHALL NOT change with the flag; only the message does.
+4. When `true`, the three codes SHALL join the `carries_caller_detail` partition, so the task-status surface forwards the same text as the JSON-RPC surface and `ai_guidance` widening applies uniformly. Each binding's "message policy matches the mapper" test SHALL hold the partition and the mapper in step under both flag values.
+5. The flag SHALL NOT affect any non-governance error code.
+
+---
+
+#### FR-ERR-012: Report a governance refusal as TASK_STATE_REJECTED
+
+| Field | Value |
+|-------|-------|
+| **ID** | FR-ERR-012 |
+| **Priority** | P0 |
+| **PRD Trace** | FR-007 |
+
+**Description:** On the task-status surface, the system SHALL place a task refused by governance (`ACL_DENIED`, `APPROVAL_DENIED`, `APPROVAL_TIMEOUT`) into `TASK_STATE_REJECTED` rather than `TASK_STATE_FAILED`.
+
+**Rationale:** A2A 1.0 defines `TASK_STATE_REJECTED` as a terminal state, and a policy refusal is exactly what it describes. This matters more than the JSON-RPC code on the `message/send` path, where the response is a JSON-RPC `result` and the error code never reaches the caller at all — the status state and its message are the entire payload the caller receives.
+
+**Acceptance Criteria:**
+1. A task refused by `ACL_DENIED`, `APPROVAL_DENIED` or `APPROVAL_TIMEOUT` SHALL reach `TASK_STATE_REJECTED`.
+2. The status message SHALL be the same text the `ErrorMapper` produces for that code, so the two surfaces cannot diverge.
+3. Every other failure SHALL continue to reach `TASK_STATE_FAILED`; `EXECUTION_CANCELLED` SHALL continue to reach `TASK_STATE_CANCELED` and `APPROVAL_PENDING` `TASK_STATE_INPUT_REQUIRED`.
+4. `TASK_STATE_REJECTED` is terminal: a rejected task SHALL NOT be resumable, and `tasks/cancel` on it SHALL return -32002 like any other terminal state.
 
 ---
 
@@ -1761,7 +1937,7 @@ apcore-a2a is the second adapter in the planned family. It depends on the `apcor
 1. No error response SHALL contain Python stack traces.
 2. No error response SHALL contain file system paths.
 3. No error response SHALL contain internal variable names or configuration values.
-4. ACL errors SHALL be masked as "Task not found" (per FR-ERR-003).
+4. Governance refusals (`ACL_DENIED`, `APPROVAL_DENIED`, `APPROVAL_TIMEOUT`) SHALL carry a fixed per-class message naming no caller id, target id, approver or rule detail (per FR-ERR-003, FR-ERR-009, FR-ERR-010), unless a deployment opts in via `disclose_refusal_reason` (FR-ERR-011). Conveying the *class* of refusal is required by A2A §13.2 and discloses nothing about what exists; it is the *detail* that is suppressed.
 5. Verified via security scan of all error response paths.
 
 ---
@@ -2235,7 +2411,7 @@ apcore-a2a is the second adapter in the planned family. It depends on the `apcor
 - At step 9, if execution exceeds the timeout (default: 300s), server transitions Task to `failed` with message "Execution timed out" and returns the failed Task.
 
 *E3: ACL denied*
-- At step 8, if ACL denies access, server returns JSON-RPC error -32001 with generic "Task not found" message (no information leakage).
+- At step 8, if ACL denies access, the server returns JSON-RPC error -32040 with the fixed message "Access denied" and places the task in `rejected` (FR-ERR-003, FR-ERR-012). The caller is told an authorization refusal happened; no caller id, target id or rule detail is disclosed.
 
 **Postconditions:**
 1. Task is stored in the task store with terminal state (`completed` or `failed`).
@@ -2485,7 +2661,7 @@ apcore-a2a is the second adapter in the planned family. It depends on the `apcor
 - Orchestrator refreshes token and retries.
 
 *A2: ACL denied*
-- At step 9, if ACL denies the identity, server returns JSON-RPC error -32001 with generic "Task not found" message (no security info leak).
+- At step 9, if ACL denies the identity, the server returns JSON-RPC error -32040 with the fixed message "Access denied" and places the task in `rejected` (FR-ERR-003, FR-ERR-012). No caller id, target id or rule detail is disclosed.
 
 **Exception Flows:**
 
@@ -2844,12 +3020,12 @@ The system consumes A2A types, JSON-RPC handling, and SSE utilities from the `a2
 | PRD Feature | PRD Title | Priority | SRS Requirements |
 |-------------|-----------|----------|------------------|
 | FR-001 | serve() -- One-Call A2A Server | P0 | FR-SRV-001, FR-SRV-002, FR-SRV-003, FR-SRV-004, FR-SRV-005 |
-| FR-002 | Agent Card Auto-Generation | P0 | FR-AGC-001, FR-AGC-002, FR-AGC-003 |
+| FR-002 | Agent Card Auto-Generation | P0 | FR-AGC-001, FR-AGC-002, FR-AGC-003, FR-AGC-006, FR-AGC-007 |
 | FR-003 | Skill Mapping | P0 | FR-SKL-001, FR-SKL-002, FR-SKL-003, FR-SKL-004 |
 | FR-004 | message/send | P0 | FR-MSG-001, FR-MSG-003, FR-MSG-004 |
 | FR-005 | Task Lifecycle (State Machine) | P0 | FR-TSK-001, FR-TSK-002, FR-TSK-003 |
 | FR-006 | Execution Routing | P0 | FR-EXE-001, FR-EXE-002, FR-EXE-003 |
-| FR-007 | Error Mapping | P0 | FR-ERR-001, FR-ERR-002, FR-ERR-003, FR-ERR-004, FR-ERR-005, FR-ERR-006, FR-ERR-007, FR-ERR-008 |
+| FR-007 | Error Mapping | P0 | FR-ERR-001, FR-ERR-002, FR-ERR-003, FR-ERR-004, FR-ERR-005, FR-ERR-006, FR-ERR-007, FR-ERR-008, FR-ERR-009, FR-ERR-010, FR-ERR-011, FR-ERR-012 |
 | FR-008 | tasks/get, ListTasks, tasks/cancel | P0 | FR-TSK-004, FR-TSK-005, FR-TSK-006 |
 | FR-009 | SSE Streaming (message/stream) | P0 | FR-MSG-002, FR-MSG-005, FR-MSG-006 |
 | FR-010 | A2A Client | P0 | FR-CLI-001, FR-CLI-002, FR-CLI-003, FR-CLI-004, FR-CLI-005 |
@@ -2877,6 +3053,8 @@ The system consumes A2A types, JSON-RPC handling, and SSE utilities from the `a2
 | FR-AGC-003 | FR-002 | P0 |
 | FR-AGC-004 | FR-014 | P1 |
 | FR-AGC-005 | FR-019 | P2 |
+| FR-AGC-006 | FR-002 | P0 |
+| FR-AGC-007 | FR-002 | P1 |
 | FR-SKL-001 | FR-003 | P0 |
 | FR-SKL-002 | FR-003 | P0 |
 | FR-SKL-003 | FR-003 | P0 |
@@ -2904,6 +3082,10 @@ The system consumes A2A types, JSON-RPC handling, and SSE utilities from the `a2
 | FR-ERR-006 | FR-007 | P0 |
 | FR-ERR-007 | FR-007 | P0 |
 | FR-ERR-008 | FR-007 | P0 |
+| FR-ERR-009 | FR-007 | P0 |
+| FR-ERR-010 | FR-007 | P0 |
+| FR-ERR-011 | FR-007 | P1 |
+| FR-ERR-012 | FR-007 | P0 |
 | FR-CLI-001 | FR-010 | P0 |
 | FR-CLI-002 | FR-010 | P0 |
 | FR-CLI-003 | FR-010 | P0 |
@@ -3073,7 +3255,9 @@ apcore Error                          A2A JSON-RPC Error
 ========================              ========================
 ModuleNotFoundError             -->   -32601 (Method not found)
 SchemaValidationError           -->   -32602 (Invalid params)
-ACLDeniedError                  -->   -32001 (TaskNotFound, hide details)
+ACLDeniedError                  -->   -32040 (Access denied, detail suppressed)
+ApprovalDeniedError             -->   -32041 (Approval denied, detail suppressed)
+ApprovalTimeoutError            -->   -32042 (Approval timed out, detail suppressed)
 ModuleExecuteError              -->   -32603 (Internal error)
 ModuleTimeoutError              -->   -32603 (Internal error)
 InvalidInputError               -->   -32602 (Invalid params)

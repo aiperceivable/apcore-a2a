@@ -1,47 +1,159 @@
 {
-  "description": "apcore exception -> JSON-RPC error parity (Algorithm A-ERR). The runner reconstructs the apcore exception from `input`, calls ErrorMapper.to_jsonrpc_error, asserts the code, and asserts message contains/excludes substrings. Codes per docs/spec/srs.md FR-ERR-* and the README error-code table.",
+  "description": "apcore exception -> JSON-RPC error parity (Algorithm A-ERR). The runner reconstructs the apcore exception from `input`, calls ErrorMapper.to_jsonrpc_error, asserts the code, and asserts message contains/excludes substrings. A case carrying `\"surface\": \"server\"` is not reconstructible as an apcore exception and is skipped by mapper-level runners. Codes per docs/spec/srs.md FR-ERR-* and the README error-code table.",
   "contract_version": "1.0",
   "sub_algorithm": "A-ERR",
   "error_cases": [
     {
       "id": "module_not_found",
-      "input": { "exception": "ModuleNotFoundError", "module": "unknown.module" },
+      "input": {
+        "exception": "ModuleNotFoundError",
+        "module": "unknown.module"
+      },
       "expected_error_code": -32601
     },
     {
       "id": "schema_validation_error_names_field",
-      "input": { "exception": "SchemaValidationError", "errors": { "width": "must be integer" } },
+      "input": {
+        "exception": "SchemaValidationError",
+        "errors": {
+          "width": "must be integer"
+        }
+      },
       "expected_error_code": -32602,
-      "expected_error_message": ["width"]
+      "expected_error_message": [
+        "width"
+      ]
     },
     {
       "id": "acl_denied_sanitized",
-      "description": "ACLDeniedError -> -32001 (TaskNotFound) with caller and module suppressed (NFR-SEC-003).",
-      "input": { "exception": "ACLDeniedError", "caller": "service-account-db-writer", "module": "admin.users.delete" },
+      "description": "ACLDeniedError -> -32040 with the fixed message \"Access denied\"; caller and module suppressed (NFR-SEC-001). The class of refusal is conveyed, the detail is not.",
+      "input": {
+        "exception": "ACLDeniedError",
+        "caller": "service-account-db-writer",
+        "module": "admin.users.delete"
+      },
+      "expected_error_code": -32040,
+      "expected_message_excludes": [
+        "service-account-db-writer",
+        "admin.users.delete",
+        "Task not found"
+      ],
+      "expected_error_message": [
+        "Access denied"
+      ]
+    },
+    {
+      "id": "approval_denied_sanitized",
+      "description": "ApprovalDeniedError -> -32041 with the fixed message \"Approval denied\". Must NOT fall into the -32603 catch-all: \"Internal server error\" is the canonical retryable failure, and a human explicitly refused this call.",
+      "input": {
+        "exception": "ApprovalDeniedError",
+        "caller": "service-account-db-writer",
+        "module": "admin.users.delete",
+        "message": "Approval denied by alice@example.com for approval 7f3c1e; module admin.users.delete"
+      },
+      "expected_error_code": -32041,
+      "expected_error_message": [
+        "Approval denied"
+      ],
+      "expected_message_excludes": [
+        "alice@example.com",
+        "7f3c1e",
+        "admin.users.delete",
+        "service-account-db-writer",
+        "Internal server error"
+      ]
+    },
+    {
+      "id": "approval_timeout_sanitized",
+      "description": "ApprovalTimeoutError -> -32042 with the fixed message \"Approval timed out\". Distinct from MODULE_TIMEOUT's \"Execution timeout\" (an execution deadline) and from the -32603 catch-all: nobody refused, nobody answered, and a re-submission may legitimately be approved.",
+      "input": {
+        "exception": "ApprovalTimeoutError",
+        "caller": "service-account-db-writer",
+        "module": "admin.users.delete",
+        "message": "Approval 7f3c1e timed out after 300s waiting on alice@example.com"
+      },
+      "expected_error_code": -32042,
+      "expected_error_message": [
+        "Approval timed out"
+      ],
+      "expected_message_excludes": [
+        "alice@example.com",
+        "7f3c1e",
+        "300",
+        "admin.users.delete",
+        "Internal server error",
+        "Execution timeout"
+      ]
+    },
+    {
+      "id": "approval_pending_is_not_a_refusal",
+      "description": "ApprovalPendingError is NOT a governance refusal and MUST NOT be swept into the -3204x block. It stays on the catch-all for the JSON-RPC surface; the server path maps it to TASK_STATE_INPUT_REQUIRED carrying its message verbatim, which is how the caller learns the approval_id it resumes with (srs FR-EXE-002). Re-coding it would turn a resumable pause into a terminal failure.",
+      "input": {
+        "exception": "ApprovalPendingError",
+        "message": "Approval required: approval_id=7f3c1e"
+      },
+      "expected_error_code": -32603,
+      "expected_message_excludes": [
+        "Access denied",
+        "Approval denied",
+        "Approval timed out"
+      ]
+    },
+    {
+      "id": "task_not_found_keeps_minus_32001",
+      "description": "-32001 is reserved for an unknown task id or one owned by another principal — deliberately indistinguishable from each other, and now distinguishable from an authorization refusal. This case exists so the governance remap cannot silently take -32001 with it.",
+      "input": {
+        "exception": "TaskNotFoundError",
+        "task_id": "task-does-not-exist"
+      },
       "expected_error_code": -32001,
-      "expected_message_excludes": ["service-account-db-writer", "admin.users.delete"]
+      "expected_error_message": [
+        "Task not found"
+      ],
+      "expected_message_excludes": [
+        "Access denied"
+      ],
+      "surface": "server"
     },
     {
       "id": "module_execute_error_generic_message",
       "description": "ModuleExecuteError -> -32603 with the fixed message; original text never surfaced.",
-      "input": { "exception": "ModuleExecuteError", "message": "Database connection failed at 192.168.1.1" },
+      "input": {
+        "exception": "ModuleExecuteError",
+        "message": "Database connection failed at 192.168.1.1"
+      },
       "expected_error_code": -32603,
-      "expected_error_message": ["Internal server error"],
-      "expected_message_excludes": ["192.168.1.1", "Database connection failed"]
+      "expected_error_message": [
+        "Internal server error"
+      ],
+      "expected_message_excludes": [
+        "192.168.1.1",
+        "Database connection failed"
+      ]
     },
     {
       "id": "unknown_exception_generic",
       "description": "An unrecognized exception -> -32603 with the same fixed generic message as ModuleExecuteError, and no raw detail.",
-      "input": { "exception": "RuntimeError", "message": "Database password: P@ssw0rd123" },
+      "input": {
+        "exception": "RuntimeError",
+        "message": "Database password: P@ssw0rd123"
+      },
       "expected_error_code": -32603,
-      "expected_error_message": ["Internal server error"],
-      "expected_message_excludes": ["P@ssw0rd123", "password"]
+      "expected_error_message": [
+        "Internal server error"
+      ],
+      "expected_message_excludes": [
+        "P@ssw0rd123",
+        "password"
+      ]
     }
   ],
   "notes": {
     "known_divergences": [
       "Message wording reconciled 2026-06-02: both ModuleExecuteError and any unrecognized exception emit the fixed string \"Internal server error\" (-32603). All three SDKs already produce this via their catch-all arm (no explicit MODULE_EXECUTE_ERROR branch); docs (srs FR-ERR-008, prd, tech-design) were aligned to match. \"Internal error\" remains only as the JSON-RPC standard NAME of code -32603, never as the emitted message.",
-      "ModuleTimeoutError maps to message \"Execution timeout\" (-32603) standalone, and to a FAILED task on the streaming/server path; the streaming form is covered by streaming_events.json."
+      "ModuleTimeoutError maps to message \"Execution timeout\" (-32603) standalone, and to a FAILED task on the streaming/server path; the streaming form is covered by streaming_events.json.",
+      "Governance refusal remap (2026-08-26, srs FR-ERR-003 / FR-ERR-009 / FR-ERR-010 / FR-ERR-012): ACL_DENIED moved from -32001 \"Task not found\" to -32040 \"Access denied\"; APPROVAL_DENIED and APPROVAL_TIMEOUT left the -32603 catch-all for -32041 \"Approval denied\" and -32042 \"Approval timed out\". All three reach TASK_STATE_REJECTED rather than TASK_STATE_FAILED on the task-status surface. -32001 now means only \"unknown or non-owned task id\". APPROVAL_PENDING is untouched. Breaking change for clients that matched -32001 or the literal \"Task not found\" to detect an authorization failure.",
+      "disclose_refusal_reason (srs FR-ERR-011) defaults to false in all three bindings. Every case here pins the default; the opt-in path is covered by each binding's own message-policy test rather than by a fixture, because the forwarded text is apcore's wording and would couple the fixture to an apcore release."
     ]
   }
 }

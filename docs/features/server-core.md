@@ -417,7 +417,9 @@ Auth exempt paths include `{"/.well-known/agent.json", "/.well-known/agent-card.
 - `ApCoreAgentExecutor` uses duck-typing for both Registry and Executor
 - Task lifecycle and state machine are managed by a2a-sdk's `DefaultRequestHandler`
 - JSON-RPC dispatch and transport are handled by a2a-sdk's `A2AStarletteApplication`
-- JSON-RPC -32001 used for ACL denials to mask resource existence (security)
+- Governance refusals carry their own codes — `-32040` ACL, `-32041` approval denied,
+  `-32042` approval timed out — each with a fixed message and a `rejected` task state.
+  `-32001` means only "unknown or non-owned task id" (srs FR-ERR-003/009/010/012)
 - `A2AServerFactory.create()` returns `tuple[Starlette, AgentCard]` (Pydantic model)
 
 ## Test Modules

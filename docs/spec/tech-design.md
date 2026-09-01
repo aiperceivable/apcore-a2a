@@ -492,7 +492,7 @@ Re-exported at the package level for convenience. The client module has no serve
 2. For each module ID, call `registry.get_definition(module_id)` to get the `ModuleDescriptor`.
 3. Skip modules with empty or `None` description; log warning: `"Skipping module {module_id}: missing description"`.
 4. Convert each descriptor to a Skill via `SkillMapper.to_skill(descriptor)`.
-5. Separate public skills (no ACL restriction, no `requires_approval`) from restricted skills.
+5. Filter the skill list for the **public** card: drop every skill whose module id begins with `system.` (apcore's reserved management namespace — unconditional, and the only one of these subtractions that still holds when no ACL is configured), any skill the configured ACL denies to the anonymous principal, any skill the ACL allows that principal but gates behind a human (`approval: required`), and any skill whose module is annotated `requires_approval` (srs FR-AGC-003). The filter resolves one identity, so it runs once at build time and is never re-evaluated per request. The **extended** card (srs FR-AGC-004) is filtered per authenticated identity instead, memoized per identity behind a bounded cache, and keeps both the gated skills and `system.*`. Both surfaces read apcore's **structured** accessor (`check_access` / `checkAccess`) and filter on the `access` axis alone; the legacy boolean folds in the approval axis and fails closed, which would silently empty the extended card of exactly the skills it exists to carry.
 6. Compute capabilities (A2A 1.0 `AgentCapabilities`):
    - `streaming`: `True` (executor streaming is always available; non-streaming modules fall back to a single chunk).
    - `pushNotifications`: from configuration parameter.
@@ -644,7 +644,9 @@ Reuses the same approach as apcore-mcp's `SchemaConverter`: deep-copy schemas, i
             "MODULE_NOT_FOUND":           (-32601, None, True),   # message = sanitized original
             "SCHEMA_VALIDATION_ERROR":    (-32602, None, True),   # message = sanitized original
             "GENERAL_INVALID_INPUT":      (-32602, "Invalid input",                True),
-            "ACL_DENIED":                 (-32001, "Task not found",               True),
+            "ACL_DENIED":                 (-32040, "Access denied",                True),
+            "APPROVAL_DENIED":            (-32041, "Approval denied",              True),
+            "APPROVAL_TIMEOUT":           (-32042, "Approval timed out",           True),
             "MODULE_TIMEOUT":             (-32603, "Execution timeout",            False),
             "EXECUTION_CANCELLED":        (-32603, "Execution cancelled",          False),
             "CALL_DEPTH_EXCEEDED":        (-32603, "Safety limit exceeded",        True),
@@ -676,7 +678,8 @@ Reuses the same approach as apcore-mcp's `SchemaConverter`: deep-copy schemas, i
     ```typescript
     // Same error-code mapping; messages are sanitized (strips paths/tracebacks, caps 500 chars).
     // MODULE_NOT_FOUND->-32601; SCHEMA_VALIDATION_ERROR->-32602; MODULE_TIMEOUT->-32603
-    // ("Execution timeout"); EXECUTION_CANCELLED->-32603; ACL_DENIED->-32001; others->-32603.
+    // ("Execution timeout"); EXECUTION_CANCELLED->-32603; ACL_DENIED->-32040;
+    // APPROVAL_DENIED->-32041; APPROVAL_TIMEOUT->-32042; others->-32603.
     class ErrorMapper {
       format(error, context?): Record<string, unknown>
       toJsonRpcError(error): { code: number; message: string }
@@ -687,7 +690,7 @@ Reuses the same approach as apcore-mcp's `SchemaConverter`: deep-copy schemas, i
 
     ```rust
     // Same error-code mapping; messages are sanitized (strips paths/tracebacks, truncates 500).
-    // ModuleNotFound->-32601; SchemaValidationError->-32602; ACLDenied->-32001;
+    // ModuleNotFound->-32601; SchemaValidationError->-32602; ACLDenied->-32040;
     // ModuleTimeout->-32603 ("Execution timeout"); ExecutionCancelled->-32603; others->-32603.
     impl ErrorMapper {
         pub fn to_jsonrpc_error(error: &ModuleError) -> JsonRpcError
@@ -702,7 +705,9 @@ Reuses the same approach as apcore-mcp's `SchemaConverter`: deep-copy schemas, i
 |-----------------|:---:|---------|:---------:|
 | `ModuleNotFoundError` | -32601 | sanitized original message | Yes |
 | `SchemaValidationError` | -32602 | sanitized original message (field details preserved) | Yes |
-| `ACLDeniedError` | -32001 | `"Task not found"` | Yes (masking true type) |
+| `ACLDeniedError` | -32040 | `"Access denied"` | Yes (class conveyed, detail suppressed) |
+| `ApprovalDeniedError` | -32041 | `"Approval denied"` | Yes (class conveyed, detail suppressed) |
+| `ApprovalTimeoutError` | -32042 | `"Approval timed out"` | Yes (class conveyed, detail suppressed) |
 | `GeneralInvalidInputError` | -32602 | `"Invalid input: {description}"` | Yes |
 | `ModuleTimeoutError` | -32603 | `"Execution timeout"` | No |
 | `ExecutionCancelledError` | -32603 | `"Execution cancelled"` | No |
@@ -2818,7 +2823,7 @@ See Section 4.3.4 for the complete error mapping from apcore exceptions to JSON-
 2. **File paths**: Stripped from error messages using regex pattern `/[^\s]+/[^\s]+`.
 3. **Internal variable names**: Not referenced in error messages.
 4. **Configuration values**: Not included in error responses.
-5. **ACL details**: `ACLDeniedError` is masked as `TaskNotFoundError` (code -32001, message "Task not found"). The actual denial reason is logged at WARNING level.
+5. **Governance details**: `ACLDeniedError` reports code -32040 with the fixed message "Access denied"; `ApprovalDeniedError` reports -32041 "Approval denied"; `ApprovalTimeoutError` reports -32042 "Approval timed out". The class of refusal is conveyed, the detail is not: no caller id, target id, approver or rule reaches the caller unless `disclose_refusal_reason` is enabled (srs FR-ERR-011). The actual denial reason is logged at WARNING level regardless.
 6. **Client-provided strings in logs**: Truncated to 1,000 characters. Control characters (ASCII 0-31 except `\n`, `\t`) stripped.
 7. **Error message length**: Capped at 500 characters in JSON-RPC responses.
 
@@ -2952,7 +2957,9 @@ currently always `[]` in all SDKs.
 
 | Scenario | Mitigation |
 |----------|-----------|
-| ACL denied | Masked as "Task not found" (-32001); actual denial logged WARNING |
+| ACL denied | "Access denied" (-32040), task `rejected`; caller/target/rule suppressed; actual denial logged WARNING |
+| Approval denied | "Approval denied" (-32041), task `rejected`; approver and approval id suppressed |
+| Approval timed out | "Approval timed out" (-32042), task `rejected`; timeout configuration suppressed |
 | Module execution error | Sanitized message; no stack traces, paths, or config |
 | Safety limit errors | Generic "Safety limit exceeded" message |
 | Unknown exceptions | Generic "Internal server error" message |
@@ -3238,7 +3245,7 @@ def client(a2a_app):
 
 ### 13.2 Package Manifest
 
-> Snapshot of the shipped manifests at 0.5.0, trimmed of metadata that carries no
+> Snapshot of the shipped manifests at 0.6.0, trimmed of metadata that carries no
 > design information (keywords, classifiers, URLs, script aliases). The manifest
 > files in each SDK repo are authoritative; this section exists to record the
 > dependency surface the design assumes.
@@ -3253,12 +3260,12 @@ def client(a2a_app):
 
     [project]
     name = "apcore-a2a"
-    version = "0.5.0"
+    version = "0.6.0"
     requires-python = ">=3.11"
     license = "Apache-2.0"
     dependencies = [
-        "apcore>=0.27.0",
-        "apcore-toolkit>=0.10.0",
+        "apcore>=0.28.0",
+        "apcore-toolkit>=0.10.2",
         "a2a-sdk[http-server]>=1.0.0",
         "starlette>=0.40.0",
         "uvicorn>=0.30.0",
@@ -3304,7 +3311,7 @@ def client(a2a_app):
     // package.json (ESM, Node >=18)
     {
       "name": "apcore-a2a",
-      "version": "0.5.0",
+      "version": "0.6.0",
       "type": "module",
       "license": "Apache-2.0",
       "main": "./dist/index.js",
@@ -3313,8 +3320,8 @@ def client(a2a_app):
       "engines": { "node": ">=18.0.0" },
       "dependencies": {
         "@a2a-js/sdk": ">=1.0.1",
-        "apcore-js": ">=0.27.0",
-        "apcore-toolkit": ">=0.10.0",
+        "apcore-js": ">=0.28.0",
+        "apcore-toolkit": ">=0.10.2",
         "express": "^5.1.0",
         "jsonwebtoken": "^9.0.3",
         "uuid": "^13.0.0"
@@ -3345,14 +3352,14 @@ def client(a2a_app):
     # Cargo.toml (edition 2021)
     [package]
     name = "apcore-a2a"
-    version = "0.5.0"
+    version = "0.6.0"
     edition = "2021"
     license = "Apache-2.0"
     description = "A2A protocol adapter for apcore — expose apcore modules as A2A agents"
 
     [dependencies]
-    apcore = ">=0.27, <0.28"
-    apcore-toolkit = ">=0.10.0"
+    apcore = ">=0.28, <0.29"
+    apcore-toolkit = ">=0.10.2"
     axum = { version = "0.8", features = ["ws"] }
     tokio = { version = "1", features = ["full"] }
     tokio-stream = "0.1"
@@ -3383,7 +3390,10 @@ def client(a2a_app):
     `apcore` carries an upper bound while the other pins do not. apcore 0.27's own
     breaking-change list was incomplete — `Registry::describe` changed its return
     *value* as well as its signature — so a caret range would let the next minor in
-    unannounced. Rust is also the only SDK whose lockfile is gitignored (library
+    unannounced. 0.28 vindicated the bound: it added a required `approval` field to
+    `ACLRule`, which a struct literal cannot skip, and changed what `ACL::check`
+    returns for an allowed-but-gated call — a source break and a silent semantic
+    one, in a minor. Rust is also the only SDK whose lockfile is gitignored (library
     crate) and whose CI does not pass `--locked`, so the range in `Cargo.toml` is
     the only thing holding the floor.
 

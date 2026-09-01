@@ -150,8 +150,13 @@ Top-level package entry point. Exposes `serve()` (blocking), `async_serve()` (re
             shutdown_timeout: Seconds to wait for graceful shutdown. Default: 30.
             execution_timeout: Seconds before task execution times out. Can also be set via APCORE_A2A_EXECUTION_TIMEOUT environment variable. Default: 300.
             metrics: Enable GET /metrics endpoint. Default: False.
-            sys_modules: Register apcore sys.* modules (health/usage/manifest) and
-                wire observability middleware. Default: False.
+            sys_modules: Register apcore's `system.*` modules (health/usage/manifest)
+                and wire observability middleware. Default: False. The three
+                `system.control.*` write modules additionally require apcore's
+                own `sys_modules.events.enabled`. Registered `system.*` modules
+                never appear on the public Agent Card (srs FR-AGC-003 criterion
+                12); they are eligible for the extended card, filtered per
+                identity.
             log_level: Logging level ("debug","info","warning","error"). Default: "info".
 
         Raises:

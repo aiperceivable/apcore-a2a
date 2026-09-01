@@ -144,11 +144,39 @@ Builds A2A Agent Card dicts from Registry metadata.
 2. For each: `registry.get_definition(module_id)` → `ModuleDescriptor`.
 3. Skip modules with an empty, `None`, or whitespace-only `description` (the description is trimmed before the check; log warning: `"Skipping module {module_id}: missing description"`).
 4. Convert each to Skill via `SkillMapper.to_skill(descriptor)`.
+4a. Filter for the **public** card (srs FR-AGC-003): drop every skill whose module
+   id begins with `system.`, any skill the configured ACL denies to the anonymous
+   principal (`@external`), any skill the ACL allows that principal but gates
+   behind a human (`approval: required`), and any skill whose module is annotated
+   `requires_approval`. The middle two and the last are governance-shaped; the
+   `system.` subtraction is **unconditional**, and it is the only one that still
+   holds when no ACL is configured — where the ACL predicates are empty and the
+   annotation covers only `system.control.*`, leaving the six read modules to
+   publish the deployment's module inventory, health and usage to any anonymous
+   caller. The `requires_approval` and `approval: required` sources are the two
+   apcore `PROTOCOL_SPEC` §6.9 composes by **union**. This resolves one identity,
+   so it runs once here rather than per request — `/.well-known/` is auth-exempt by
+   design, and a per-caller filter there would let any anonymous client drive one
+   governance audit write per skill per request. The **extended** card (srs
+   FR-AGC-004) is filtered per authenticated identity instead, memoized per
+   identity, and keeps both the gated skills and `system.*` — the namespace
+   exclusion is a property of the public card, not of the skill.
+
+   Read the ACL through the **structured** accessor — `ACL.check_access` /
+   `ACL.checkAccess` (apcore >= 0.28.0) — and filter on `access` alone. The legacy
+   boolean `ACL.check` folds authorization and approval together and **fails
+   closed** on an approval requirement, which is right for a caller about to
+   execute and wrong here: it would delete a gated skill from the extended card
+   too, reporting a refusal the ACL never issued. Pass no arguments projection: a
+   card is discovery, there is no call site, and an `arguments` condition (§6.1.7)
+   is unevaluable — which leaves an `allow` rule's `approval: required` pending and
+   composing (§6.1.1 rule 5), so a skill gated only for some argument shapes
+   reports a requirement here and stays off the public card.
 5. Compute `capabilities` (A2A 1.0 `AgentCapabilities`):
    - `streaming`: True (executor streaming is always available; non-streaming modules fall back to a single chunk).
    - `pushNotifications`: from configuration.
    - `extensions`: list of A2A protocol extensions (`[]` by default).
-   - `extendedAgentCard`: True when security schemes are configured (replaces 0.3's top-level `supportsAuthenticatedExtendedCard`).
+   - `extendedAgentCard`: True only when the binding both has an `Authenticator` configured **and** serves the extended-card endpoint (srs FR-AGC-002, FR-AGC-006). Replaces 0.3's top-level `supportsAuthenticatedExtendedCard`. A binding advertises no capability it does not serve: A2A §3.2.x entitles a client to read the flag and call the method.
 6. Build the **A2A 1.0** card. The 0.3 top-level `url` and `protocolVersion` are
    replaced by `supportedInterfaces`; security requirements and signatures are
    first-class:
@@ -240,7 +268,7 @@ Converts `ModuleDescriptor` to A2A Skill dict.
 | computed | `inputModes` | See mode logic below |
 | computed | `outputModes` | See mode logic below |
 | `[]` | `securityRequirements` | Required by A2A 1.0 `AgentSkill`; empty by default |
-| `annotations` | *(not mapped)* | See note below |
+| `annotations` | `tags` (namespaced) | See note below |
 
 **Input/output mode logic:**
 
@@ -252,7 +280,25 @@ Converts `ModuleDescriptor` to A2A Skill dict.
 | `output_schema` defined | | `["application/json"]` |
 | No `output_schema` | | `["text/plain"]` |
 
-**Note on annotations:** `_build_extensions()` has been removed. `a2a.types.AgentSkill` has no `extensions` field in the A2A SDK; apcore annotations are available via the Explorer UI's `_inputSchemas` enrichment instead.
+**Note on annotations (srs FR-SKL-004):** `readonly`, `destructive`, `idempotent`
+and `requires_approval` are emitted as namespaced entries in the standard `tags`
+field — `apcore:readonly`, `apcore:destructive`, `apcore:idempotent`,
+`apcore:requires-approval` — in that fixed order, appended after the module's own
+tags and de-duplicated against them. Only `true` flags are emitted, so absence
+means "not asserted", never "asserted false" (matching how the apcore MCP binding
+maps the same annotations onto optional `readOnlyHint` / `destructiveHint` /
+`idempotentHint`).
+
+`tags` is the carrier because it is the only one available: A2A 1.0 `AgentSkill`
+is `{id, name, description, tags, examples, inputModes, outputModes,
+securityRequirements}` — no `extensions`, no `metadata` — and in the Python
+binding the type is generated from the A2A protobuf schema, so a vendor member
+cannot be added at all. The `apcore:` prefix keeps annotations out of the
+module's own flat tag namespace.
+
+The full annotation set, including the flags not promoted to tags (`open_world`,
+`cacheable`, `paginated`, …), remains available through the Explorer UI's
+`_inputSchemas` enrichment.
 
 ---
 
@@ -385,7 +431,9 @@ not by exception class names.
 |---|---|---|---|
 | `MODULE_NOT_FOUND` | -32601 | sanitized original message | Yes |
 | `SCHEMA_VALIDATION_ERROR` | -32602 | sanitized original message | Yes |
-| `ACL_DENIED` | -32001 | `"Task not found"` | **Yes** (masks real type) |
+| `ACL_DENIED` | -32040 | `"Access denied"` | **Yes** (class conveyed, detail suppressed) |
+| `APPROVAL_DENIED` | -32041 | `"Approval denied"` | **Yes** (class conveyed, detail suppressed) |
+| `APPROVAL_TIMEOUT` | -32042 | `"Approval timed out"` | **Yes** (class conveyed, detail suppressed) |
 | `MODULE_TIMEOUT` | -32603 | `"Execution timeout"` | No |
 | `EXECUTION_CANCELLED` | -32603 | `"Execution cancelled"` | No |
 | `GENERAL_INVALID_INPUT` | -32602 | `"Invalid input: {sanitized description}"` | Yes |

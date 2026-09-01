@@ -51,19 +51,19 @@ By reading the existing apcore metadata—including `input_schema`, `output_sche
     ```bash
     pip install apcore-a2a
     ```
-    *Requires Python 3.11+ and apcore 0.22.0+.*
+    *Requires Python 3.11+ and apcore 0.28.0+.*
 
 === "TypeScript"
     ```bash
     npm install apcore-a2a
     ```
-    *Requires Node.js 18+ and apcore-js 0.22.0+.*
+    *Requires Node.js 18+ and apcore-js 0.28.0+.*
 
 === "Rust"
     ```bash
     cargo add apcore-a2a
     ```
-    *Requires Rust 1.75+ and apcore 0.22+.*
+    *Requires Rust 1.75+ and apcore 0.28+.*
 
 ---
 

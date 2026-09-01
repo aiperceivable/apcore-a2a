@@ -1,5 +1,5 @@
 {
-  "description": "Agent Card builder-level wire-shape parity (Algorithm A-CARD). The runner builds an AgentCard via AgentCardBuilder.build(registry, name, description, version, url, capabilities, security_schemes) where `security_schemes` is the FLAT descriptor returned by JWTAuthenticator.security_schemes(), serializes to the A2A 1.0 JSON wire form (camelCase), and partial-matches expected_card. Locks the proto3 securitySchemes oneof shape and supportedInterfaces (no top-level url). NOTE: agent name/version fallback and capabilities.{streaming,pushNotifications} computation live in the serve() layer (not the builder) and are covered by per-SDK TC-AGC unit tests, not by this fixture.",
+  "description": "Agent Card builder-level wire-shape parity (Algorithm A-CARD). The runner builds an AgentCard via AgentCardBuilder.build(registry, name, description, version, url, capabilities, security_schemes) where `security_schemes` is the FLAT descriptor returned by JWTAuthenticator.security_schemes(), serializes to the A2A 1.0 JSON wire form (camelCase), and partial-matches expected_card. Locks the proto3 securitySchemes oneof shape, supportedInterfaces (no top-level url), the public-card skill-visibility filter (srs FR-AGC-003) and the apcore: annotation tags (srs FR-SKL-004). NOTE: agent name/version fallback and capabilities.{streaming,pushNotifications} computation live in the serve() layer (not the builder) and are covered by per-SDK TC-AGC unit tests, not by this fixture.",
   "contract_version": "1.0",
   "sub_algorithm": "A-CARD",
   "test_cases": [
@@ -57,13 +57,231 @@
       },
       "expected_security_schemes_empty": true,
       "expected_security_requirements_empty": true
+    },
+    {
+      "id": "annotation_tags_namespaced",
+      "description": "apcore behavioral annotations reach the wire as namespaced entries in the standard `tags` field, in the fixed order readonly, destructive, idempotent, requires-approval, appended after the module's own tags (srs FR-SKL-004). A2A 1.0 AgentSkill has no extensions or metadata member, so tags is the only carrier.",
+      "input": {
+        "name": "annotated-agent",
+        "description": "d",
+        "version": "1.0.0",
+        "url": "http://localhost:8000",
+        "modules": [
+          {
+            "module_id": "fs.read",
+            "description": "Reads a file",
+            "tags": ["filesystem"],
+            "annotations": { "readonly": true, "idempotent": true }
+          },
+          {
+            "module_id": "fs.remove",
+            "description": "Removes a file",
+            "tags": ["filesystem"],
+            "annotations": { "destructive": true }
+          },
+          { "module_id": "math.add", "description": "Adds", "tags": ["math"] }
+        ]
+      },
+      "expected_skill_tags": {
+        "fs.read": ["filesystem", "apcore:readonly", "apcore:idempotent"],
+        "fs.remove": ["filesystem", "apcore:destructive"],
+        "math.add": ["math"]
+      },
+      "expected_skill_count": 3
+    },
+    {
+      "id": "annotation_tags_absent_when_false",
+      "description": "Only true flags are emitted; false, absent, and a descriptor with no annotations object at all all produce no tag. Absence means \"not asserted\", never \"asserted false\" — matching how the apcore MCP binding maps the same annotations onto optional hints.",
+      "input": {
+        "name": "annotated-agent",
+        "description": "d",
+        "version": "1.0.0",
+        "url": "http://localhost:8000",
+        "modules": [
+          {
+            "module_id": "math.add",
+            "description": "Adds",
+            "tags": [],
+            "annotations": {
+              "readonly": false,
+              "destructive": false,
+              "idempotent": false,
+              "requires_approval": false
+            }
+          }
+        ]
+      },
+      "expected_skill_tags": { "math.add": [] },
+      "expected_skill_count": 1
+    },
+    {
+      "id": "public_card_hides_requires_approval",
+      "description": "A module annotated requires_approval is absent from the PUBLIC card even with no ACL configured (srs FR-AGC-003 criterion 7). It reappears on the extended card, which is what gives capabilities.extendedAgentCard something to mean.",
+      "input": {
+        "name": "gated-agent",
+        "description": "d",
+        "version": "1.0.0",
+        "url": "http://localhost:8000",
+        "card_variant": "public",
+        "modules": [
+          { "module_id": "math.add", "description": "Adds" },
+          {
+            "module_id": "admin.users.delete",
+            "description": "Deletes a user",
+            "annotations": { "requires_approval": true, "destructive": true }
+          }
+        ]
+      },
+      "expected_skill_ids": ["math.add"],
+      "expected_skill_count": 1
+    },
+    {
+      "id": "public_card_hides_acl_denied_to_anonymous",
+      "description": "A skill the ACL denies to the anonymous principal (@external) is absent from the public card (srs FR-AGC-003 criterion 6). Before this rule Python and TypeScript advertised every registered skill — id, name, description and full input schema — to any anonymous caller, because /.well-known/ is auth-exempt by design.",
+      "input": {
+        "name": "acl-agent",
+        "description": "d",
+        "version": "1.0.0",
+        "url": "http://localhost:8000",
+        "card_variant": "public",
+        "acl_rules": [
+          { "targets": ["admin.*"], "callers": ["@external"], "effect": "deny" }
+        ],
+        "modules": [
+          { "module_id": "math.add", "description": "Adds" },
+          { "module_id": "admin.reindex", "description": "Reindexes" }
+        ]
+      },
+      "expected_skill_ids": ["math.add"],
+      "expected_skill_count": 1
+    },
+    {
+      "id": "extended_card_is_not_a_copy_of_the_public_card",
+      "description": "The extended card carries what the AUTHENTICATED caller may invoke, including requires_approval skills (srs FR-AGC-004). Python previously returned CopyFrom(base_card) — a verbatim copy — while Rust and TypeScript did not route the endpoint at all despite all three advertising capabilities.extendedAgentCard.",
+      "input": {
+        "name": "gated-agent",
+        "description": "d",
+        "version": "1.0.0",
+        "url": "http://localhost:8000",
+        "card_variant": "extended",
+        "identity": { "sub": "agent-1", "identity_type": "service" },
+        "modules": [
+          { "module_id": "math.add", "description": "Adds" },
+          {
+            "module_id": "admin.users.delete",
+            "description": "Deletes a user",
+            "annotations": { "requires_approval": true, "destructive": true }
+          }
+        ]
+      },
+      "expected_skill_ids": ["math.add", "admin.users.delete"],
+      "expected_skill_count": 2
+    },
+    {
+      "id": "public_card_hides_acl_approval_gated",
+      "description": "A skill the ACL ALLOWS the anonymous principal but gates behind a human (approval: required, apcore >= 0.28.0 PROTOCOL_SPEC §6.1.6) is absent from the public card, on the same terms as an annotated one (srs FR-AGC-003 criterion 11). The annotation and the ACL rule are the two sources apcore §6.9 composes by union; a binding that reads only the annotation leaves this skill advertised to callers who cannot just call it.",
+      "input": {
+        "name": "acl-approval-agent",
+        "description": "d",
+        "version": "1.0.0",
+        "url": "http://localhost:8000",
+        "card_variant": "public",
+        "acl_rules": [
+          { "targets": ["vcs.push"], "callers": ["*"], "effect": "allow", "approval": "required" },
+          { "targets": ["*"], "callers": ["*"], "effect": "allow" }
+        ],
+        "modules": [
+          { "module_id": "math.add", "description": "Adds" },
+          { "module_id": "vcs.push", "description": "Pushes" }
+        ]
+      },
+      "expected_skill_ids": ["math.add"],
+      "expected_skill_count": 1
+    },
+    {
+      "id": "extended_card_keeps_acl_approval_gated",
+      "description": "The same ACL-gated skill is PRESENT on the extended card: the caller is authorized and the gate is a prompt they can satisfy, not a refusal (srs FR-AGC-004 criteria 2 and 10). This is the case that separates the two accessors — apcore's legacy boolean ACL.check folds authorization and approval together and returns false here, so a binding filtering on it would delete the skill from BOTH cards and report a refusal the ACL never issued. Filtering on ACL.check_access / checkAccess and reading only `access` is the contract.",
+      "input": {
+        "name": "acl-approval-agent",
+        "description": "d",
+        "version": "1.0.0",
+        "url": "http://localhost:8000",
+        "card_variant": "extended",
+        "identity": { "sub": "agent-1", "identity_type": "service" },
+        "acl_rules": [
+          { "targets": ["vcs.push"], "callers": ["*"], "effect": "allow", "approval": "required" },
+          { "targets": ["*"], "callers": ["*"], "effect": "allow" }
+        ],
+        "modules": [
+          { "module_id": "math.add", "description": "Adds" },
+          { "module_id": "vcs.push", "description": "Pushes" }
+        ]
+      },
+      "expected_skill_ids": ["math.add", "vcs.push"],
+      "expected_skill_count": 2
+    },
+    {
+      "id": "public_card_excludes_system_namespace_with_no_acl",
+      "description": "apcore's reserved management namespace (system.*, PROTOCOL_SPEC §6.7) is absent from the public card with NO ACL configured (srs FR-AGC-003 criteria 12 and 13). This is the case both ACL-shaped models leave open: the ACL predicates are empty, and the requires_approval annotation covers only system.control.*, so the six read modules — which enumerate the deployment's module inventory, health and usage — would otherwise be published by id, name, description and full input schema to any anonymous caller on the auth-exempt /.well-known/ route. A binding must not read `no ACL` as `advertise everything`.",
+      "input": {
+        "name": "managed-agent",
+        "description": "d",
+        "version": "1.0.0",
+        "url": "http://localhost:8000",
+        "card_variant": "public",
+        "modules": [
+          { "module_id": "math.add", "description": "Adds" },
+          { "module_id": "system.health.summary", "description": "Reports health" },
+          { "module_id": "system.manifest.full", "description": "Lists every module" },
+          {
+            "module_id": "system.control.update_config",
+            "description": "Updates configuration",
+            "annotations": { "requires_approval": true }
+          }
+        ]
+      },
+      "expected_skill_ids": ["math.add"],
+      "expected_skill_count": 1
+    },
+    {
+      "id": "extended_card_keeps_system_namespace",
+      "description": "The same system.* skills ARE on the extended card, filtered per identity like any other skill (srs FR-AGC-004 criterion 11). The namespace exclusion is a property of the public card, not of the skill: an authenticated management agent the ACL permits must still be able to discover the surface it is entitled to drive. system.control.update_config is present because requires_approval keeps a skill on the extended card (criterion 2), so this case also proves the two rules compose rather than one masking the other.",
+      "input": {
+        "name": "managed-agent",
+        "description": "d",
+        "version": "1.0.0",
+        "url": "http://localhost:8000",
+        "card_variant": "extended",
+        "identity": { "sub": "agent-1", "identity_type": "service" },
+        "modules": [
+          { "module_id": "math.add", "description": "Adds" },
+          { "module_id": "system.health.summary", "description": "Reports health" },
+          { "module_id": "system.manifest.full", "description": "Lists every module" },
+          {
+            "module_id": "system.control.update_config",
+            "description": "Updates configuration",
+            "annotations": { "requires_approval": true }
+          }
+        ]
+      },
+      "expected_skill_ids": [
+        "math.add",
+        "system.control.update_config",
+        "system.health.summary",
+        "system.manifest.full"
+      ],
+      "expected_skill_count": 4
     }
   ],
   "notes": {
     "known_divergences": [
       "auth.md once wrongly showed securityRequirements as [{\"bearerAuth\":[]}]; the locked value is always empty. On the JSON wire (proto3) an empty repeated/map field is omitted, so the runner treats an absent securitySchemes/securityRequirements as empty rather than asserting a literal [] / {}.",
       "TS/Rust previously emitted the flat security-scheme descriptor on the wire; fixed via toA2ASecurityScheme / to_a2a_security_schemes so all three now emit the oneof shape asserted here.",
-      "provider may be null or an object depending on configuration; not asserted here."
+      "provider may be null or an object depending on configuration; not asserted here.",
+      "Skill visibility converged 2026-08-26 (srs FR-AGC-003 / FR-AGC-004). Before this fixture the three bindings gave three different answers to \"which skills does an unauthenticated caller see\": Rust filtered the public card per caller (server/handlers.rs acl_filtered_card + FilteredCard), Python and TypeScript filtered nothing at all (_build_skills / buildSkills iterate registry.list() and never consult the ACL). None matched the static two-tier split the spec described. Breaking change for Python and TypeScript deployments that relied on the public card as a full catalogue.",
+      "apcore 0.28.0 (PROTOCOL_SPEC §6.1.6) split one ACL verdict into two independent axes — authorization and approval — and made the legacy boolean ACL.check fail closed on an approval requirement. All three bindings filtered cards on that boolean, so an allow-with-approval skill would have silently vanished from the extended card too. Fixed 2026-09-01 by moving every card filter to the structured accessor (check_access / checkAccess); the two acl_approval_gated cases pin both directions.",
+      "apcore-a2a#5: `sys_modules` / `sysModules` was a no-op in all three bindings — Python and TypeScript built the registration Config as `{apcore: {sys_modules: {enabled}}}` while apcore reads `sys_modules.enabled` in legacy mode, and Rust passed `Config::default()` outright and discarded the Result. So no `system.*` module ever reached a card, and the exposure the two `system_namespace` cases pin was latent rather than live. Fixed 2026-09-01 together with the namespace rule, deliberately in that order: repairing the config path alone is what would have opened the hole.",
+      "Cases carrying `card_variant`, `acl_rules` or `identity` exercise the serve()/factory layer rather than AgentCardBuilder.build() alone, since the anonymous-principal filter needs the executor's ACL. Runners that only drive the builder skip them; the per-SDK card-visibility tests cover the same assertions."
     ]
   }
 }

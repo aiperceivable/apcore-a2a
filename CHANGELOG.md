@@ -5,6 +5,248 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.6.0] - 2026-09-01
+
+Minor release across all three SDKs, resolving `aiperceivable/apcore-a2a` issues #2,
+#3, #4 and #5 and `apcore-a2a-rust` #2. One principle runs through all five: **apcore
+already draws these distinctions, and a transport binding's job is to convey them,
+not to flatten them.** Three governance refusals apcore names separately were being
+collapsed onto two codes that mean something else; four behavioral annotations apcore
+models were reaching no A2A caller at all; and the ACL's verdict on who may see what
+was honoured in one binding, ignored in two.
+
+The runtime floor moves to **apcore 0.28.0 / apcore-toolkit 0.10.2**, and the same
+principle covers what apcore 0.28.0 changed underneath: it split one ACL verdict into
+two independent results, and this release reads them apart rather than folding them
+back together.
+
+**Breaking** for callers that matched `-32001` or the literal `"Task not found"` to
+detect an authorization failure, and for Python/TypeScript deployments that relied on
+the public Agent Card as a full catalogue.
+
+### Changed
+
+- **A governance refusal is reported as itself** (srs FR-ERR-003, FR-ERR-009,
+  FR-ERR-010, FR-ERR-012). `ACL_DENIED` moves from `-32001 "Task not found"` to
+  `-32040 "Access denied"`; `APPROVAL_DENIED` and `APPROVAL_TIMEOUT` leave the
+  `-32603` catch-all for `-32041 "Approval denied"` and `-32042 "Approval timed
+  out"`. All three now reach `TASK_STATE_REJECTED` instead of `TASK_STATE_FAILED`,
+  which matters most on `message/send`, where the response is a JSON-RPC `result`
+  and the error code never reaches the caller at all.
+
+  The old mapping told an agent a *different* failure had happened, one whose correct
+  response was the opposite of the real one: `"Task not found"` sends a caller back to
+  re-fetch or re-send the one thing that was fine, and `"Internal server error"` is
+  the canonical *retryable* failure — for a call a human had explicitly refused. A2A
+  §13.2 requires a server to return an authorization error (MUST) and to say what was
+  refused (SHOULD); its MUST NOT forbids revealing *the existence of a resource*, not
+  the *class* of failure, so a fixed `"Access denied"` naming no caller, target or rule
+  satisfies all three. `-32040`–`-32042` sit above A2A 1.0's reserved `-32001`–`-32009`
+  in the JSON-RPC implementation-defined range, which is the "JSON-RPC custom error"
+  §13.2 names for this binding.
+
+  `-32001` now means only "unknown task id, or a task owned by another principal" —
+  still deliberately indistinguishable from each other, no longer conflated with
+  authorization. `APPROVAL_PENDING` is untouched: it remains a resumable
+  `TASK_STATE_INPUT_REQUIRED` carrying its message verbatim, which is how a caller
+  learns the `approval_id` it resumes with.
+
+- **The public Agent Card shows what an anonymous caller could actually invoke**
+  (srs FR-AGC-003). Every registered skill, minus those the ACL denies to the
+  anonymous principal, minus those annotated `requires_approval`. The three bindings
+  previously gave three different answers: Rust filtered per caller, Python and
+  TypeScript filtered nothing — publishing every restricted skill's id, name,
+  description and full input schema to any anonymous caller, since `/.well-known/`
+  is auth-exempt by design. None matched the static split the spec described.
+
+  The filter resolves one identity, so it runs once at build time. Per-caller
+  filtering moves to the extended card, where the caller is authenticated — which is
+  what makes it affordable: on the auth-exempt public route it let any anonymous
+  client drive one governance audit write per skill per request.
+
+- **The extended Agent Card carries what the authenticated caller may invoke**
+  (srs FR-AGC-004), including `requires_approval` skills. Python previously returned
+  `CopyFrom(base_card)`, a verbatim copy; Rust and TypeScript advertised
+  `capabilities.extendedAgentCard` and never routed the endpoint at all.
+
+- **`capabilities.extendedAgentCard` is no longer derived from `auth is not None`**
+  (srs FR-AGC-002, FR-AGC-006). A binding advertises a capability only when it serves
+  it. A2A §3.2.x entitles a client to read the flag and call the method.
+
+- **Card visibility reads apcore's two governance axes apart** (srs FR-AGC-003 "The
+  two axes", criterion 11; FR-AGC-004 criteria 2 and 10). apcore 0.28.0
+  (`PROTOCOL_SPEC` §6.1.6) gave an ACL rule an `approval: required` field orthogonal
+  to `effect`, so one check now resolves two independent results — may this caller
+  reach this target, and must this call be put to a human — and made the legacy
+  boolean `ACL.check` **fail closed** on the second. All three bindings filtered
+  their cards on that boolean. Left alone, a skill the ACL *allows* the caller but
+  gates behind a human would have silently vanished from the **extended** card too:
+  a refusal the ACL never issued, and the caller left unable to learn that a
+  capability it holds exists at all.
+
+  Every card filter now reads the structured accessor (`check_access` /
+  `checkAccess`) and filters on `access` alone. `approval_required` decides only
+  *which surface*: it joins the module's `requires_approval` annotation as the second
+  source the public card subtracts, composed by union exactly as apcore §6.9 composes
+  them. Reading the annotation alone would have left on the public card a skill an
+  anonymous caller cannot in fact just call — since 0.28.0 the annotation describes
+  the *module*, not the call (apcore#110).
+
+  The ACL is consulted with no arguments projection, because a card is discovery and
+  there is no call site. An `arguments` condition (§6.1.7) is therefore unevaluable,
+  which leaves an `allow` rule's requirement *pending* and composing (§6.1.1 rule 5)
+  — so a skill gated only for some argument shapes reports a requirement here and
+  stays off the public card. That is the honest discovery-time answer.
+
+### Added
+
+- **apcore's behavioral annotations reach the wire** (srs FR-SKL-004). `readonly`,
+  `destructive`, `idempotent` and `requires_approval` are emitted as namespaced
+  entries in the standard `tags` field — `apcore:readonly`, `apcore:destructive`,
+  `apcore:idempotent`, `apcore:requires-approval` — in that fixed order, appended
+  after the module's own tags and de-duplicated against them. Only `true` flags are
+  emitted, matching how the apcore MCP binding maps the same annotations onto
+  optional `readOnlyHint` / `destructiveHint` / `idempotentHint`.
+
+  A2A 1.0 `AgentSkill` is `{id, name, description, tags, examples, inputModes,
+  outputModes, securityRequirements}` — no `extensions`, no `metadata`, and in the
+  Python binding the type is generated from the A2A protobuf schema, so a vendor
+  member cannot be added at all. `tags` is the only carrier that exists; the
+  `apcore:` prefix keeps it out of the module's own flat tag namespace.
+
+  This is also what makes retry semantics usable. `retryable` is a property of the
+  *error*; whether a retry is safe is a property of the *operation*. A timeout is
+  retryable for a read and dangerous for a non-idempotent mutation. apcore resolves
+  that internally with exactly this two-factor rule; before this change an A2A caller
+  had the error half and not the operation half.
+
+- **`disclose_refusal_reason` configuration flag, default off** (srs FR-ERR-011).
+  When enabled, forwards apcore's own sanitized message for the three governance
+  codes instead of the fixed per-class string. The *class* of refusal is always
+  conveyed; the *detail* is a deployment choice. A server whose callers are its own
+  agents wants the reason — which is what the apcore MCP binding reports today, so an
+  operator comparing the two transports otherwise sees it on one and not the other.
+
+- **`FR-AGC-006`**: a binding SHALL advertise no capability it does not serve, with a
+  conformance fixture asserting each advertised capability has a served counterpart.
+
+- **apcore's `system.*` management namespace never reaches the public Agent Card**
+  (srs FR-AGC-003 criteria 12 and 13, FR-AGC-004 criterion 11; `apcore-a2a#5`).
+  Skills whose module id is in apcore's reserved namespace (`PROTOCOL_SPEC` §6.7)
+  are removed from the public card **unconditionally** — independent of ACL state,
+  of the `requires_approval` annotation, and of how `sys_modules` is configured.
+  They stay on the extended card, filtered per identity like any other skill.
+
+  Every other subtraction the public card makes is governance-shaped, and with no
+  ACL configured they all collapse: the ACL predicates are empty, and the
+  annotation covers only the three `system.control.*` write modules — leaving the
+  six read modules, which enumerate the deployment's module inventory
+  (`system.manifest.*`), its health and its usage, published by id, name,
+  description and full input schema to any anonymous caller on the auth-exempt
+  `/.well-known/` route. `ACL.discover()` yields nothing for a missing root by
+  design, so "no ACL at all" is the default rather than an edge case, and the rule
+  that has to hold there cannot be shaped like a governance verdict. Rust made
+  this explicit — `let Some(acl) = executor.acl() else { return card.clone() }` —
+  and Python and TypeScript reached the same place by filtering nothing.
+
+  Keying on the namespace conveys apcore's own boundary rather than inventing one:
+  apcore identifies the surface by that prefix itself, in
+  `Executor.governance_state()`, and its registries reject a user module that
+  tries to claim the namespace (`InvalidModuleId: Module ID contains reserved
+  word: 'system'`), so the prefix cannot collide.
+
+  Refusing to build such a card was the alternative and is deliberately **not**
+  taken: it would break a running deployment on upgrade, and a binding cannot know
+  the operator's intent. FR-AGC-007 carries the signal instead.
+
+- **`FR-AGC-007`**: at server construction the binding reads apcore's
+  `Executor.governance_state()` and warns when `unprotected_control_surface` is
+  true. It never refuses to start and never alters a card.
+
+  Withholding `system.*` from the public card removes the surface from *discovery*,
+  not from *dispatch*. `system.control.*` declares `requires_approval`, but
+  apcore's approval gate warns once and continues when no `ApprovalHandler` is
+  configured, failing closed only under `ExecutionPolicy(strict=True)` — so the
+  write modules stay callable, and the card rule must not be mistaken for a fix to
+  that. `governance_state()` (apcore 0.28.0, `PROTOCOL_SPEC` §6.6.5) is the right
+  question to ask: it answers "is a gate *engaging*", not "is an ACL *attached*",
+  and the ACL and approval gates are pipeline *steps* that the `internal`,
+  `testing` and `minimal` strategies remove — so an executor can hold an ACL that
+  no step ever consults. apcore made it a pure read and named "a serve-time adapter
+  may warn or refuse" as the two reactions; this is the warn.
+
+### Runtime floor
+
+The floor moves to **apcore 0.28.0 / apcore-toolkit 0.10.2**. apcore-toolkit 0.10.2
+is a floor bump only — no API change. apcore 0.28.0 required one code change in this
+project (the card-visibility axes, above) and one source fix in the Rust test suite
+(`apcore::acl::ACLRule` gained a required `approval` field, which a struct literal
+cannot skip). Three further apcore changes alter what an A2A caller observes without
+any code change here, and are called out so an operator upgrading is not surprised:
+
+- **Python only — a module declaring `input_schema` / `output_schema` as a raw dict
+  is now actually validated.** `_DictSchemaAdapter.model_validate` was a
+  pass-through, so every constraint such a schema declared (`required`, `enum`,
+  `type`, …) was inert. Calls that previously reached the handler with junk now fail
+  as `SCHEMA_VALIDATION_ERROR`, which this binding already maps to `-32602`. Modules
+  using Pydantic models are unaffected.
+- **An ACL `deny` rule whose condition cannot be evaluated now denies** instead of
+  going inert. That changes both what the Agent Card advertises and what a call
+  returns, in the safe direction.
+- **An ACL rule carrying an `effect` outside `allow` / `deny` now fails at
+  construction** rather than being read as `deny`. A deployment whose ACL file
+  carried `effect: "Allow"` will fail to start rather than silently deny.
+
+### Fixed
+
+- **`sys_modules` / `sysModules` registered nothing, in all three bindings**
+  (`apcore-a2a#5`). apcore reads `sys_modules.enabled` — a **top-level** config
+  section — while Python and TypeScript built the registration `Config` as
+  `{apcore: {sys_modules: {enabled: true}}}`, so the lookup missed,
+  `register_sys_modules` returned at its first line, and Python logged
+  `"Registered apcore system modules"` anyway. Rust never even tried: it passed
+  `Config::default()` and discarded the `Result` with `let _ =`. The flag was a
+  silent no-op in every deployment since it was introduced.
+
+  Fixed together with the namespace rule above, deliberately in that order:
+  repairing the config path on its own is precisely what would have opened the
+  hole that rule closes. Rust now inspects the `Result` and reports a failure;
+  Python and TypeScript carry through operator settings found under either
+  spelling, top-level winning; all three log the module ids they actually
+  registered rather than asserting success.
+
+- **Rust: `async_serve` no longer derives its bind address from `config.url`**
+  (`apcore-a2a-rust#2`). `APCoreA2AConfig` gains `host` and `port`; `url` is now used
+  only for the Agent Card, defaulting to `http://{host}:{port}` exactly as the Python
+  and TypeScript bindings have always done. The old code string-split `url` on `://`
+  and fell back to `0.0.0.0:8000` when the split failed, so a scheme-less loopback
+  value like `127.0.0.1:18999` silently published every skill on every interface, on
+  a port the operator never chose — with nothing logged. A path, a trailing slash or a
+  missing port failed to bind with an address-parse error naming neither the URL nor
+  the cause. Rust also gains the unauthenticated-public-bind warning Python and
+  TypeScript already emit.
+
+### Conformance
+
+- `fixtures/error_mapping.json`: `acl_denied_sanitized` re-pinned to `-32040`;
+  `approval_denied_sanitized`, `approval_timeout_sanitized`,
+  `approval_pending_is_not_a_refusal` and `task_not_found_keeps_minus_32001` added.
+  The last two exist so the remap cannot silently take `APPROVAL_PENDING` or `-32001`
+  with it.
+- `fixtures/agent_card.json`: `annotation_tags_namespaced`,
+  `annotation_tags_absent_when_false`, `public_card_hides_requires_approval`,
+  `public_card_hides_acl_denied_to_anonymous`,
+  `extended_card_is_not_a_copy_of_the_public_card`,
+  `public_card_hides_acl_approval_gated` and `extended_card_keeps_acl_approval_gated`
+  added — the card-visibility coverage whose absence let the three bindings diverge
+  unnoticed, and the pair that pins both directions of the authorization/approval
+  split. The last two carry `card_variant`, so builder-level runners skip them and
+  each SDK's card-visibility test asserts them.
+- `fixtures/agent_card.json`: `public_card_excludes_system_namespace_with_no_acl`
+  and `extended_card_keeps_system_namespace` added — the "system modules enabled,
+  no ACL" case `apcore-a2a#5` identified as the gap, asserted identically across
+  the three bindings.
+
 ## [0.5.0] - 2026-08-17
 
 Minor release across all three SDKs. Task-addressed methods are now scoped to the

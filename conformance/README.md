@@ -41,7 +41,7 @@ every SDK's conformance runner.
 | Fixture | Sub-algorithm | Locks |
 |---|---|---|
 | `fixtures/jwt_claim_coercion.json` | A-AUTH | JWT claim → `Identity` coercion (Rust-strict canonical rule) |
-| `fixtures/agent_card.json` | A-CARD | Agent Card field shapes, incl. `securitySchemes` proto3 `oneof` form |
+| `fixtures/agent_card.json` | A-CARD | Agent Card field shapes (incl. `securitySchemes` proto3 `oneof` form), `apcore:` annotation tags, and public-vs-extended skill visibility |
 | `fixtures/error_mapping.json` | A-ERR | apcore exception → JSON-RPC error code + sanitized message |
 | `fixtures/skill_resolution.json` | A-SKILL | missing/invalid `skillId` and unparseable parts → FAILED task (not `-32602`) |
 | `fixtures/streaming_events.json` | A-STREAM | SSE event sequence incl. terminal `lastChunk` empty-artifact marker |
@@ -55,16 +55,33 @@ every SDK's conformance runner.
 | `-32600` | Invalid Request | missing/invalid `jsonrpc` field, or missing `message` envelope |
 | `-32601` | Method not found | unknown JSON-RPC method, `ModuleNotFoundError` |
 | `-32602` | Invalid params | `SchemaValidationError`, missing `message` envelope |
-| `-32001` | Task not found | unknown task id; **also** `ACLDeniedError` (detail-suppressed to prevent disclosure) |
+| `-32001` | Task not found | unknown task id, or a task owned by another principal — deliberately indistinguishable. **No longer** used for `ACLDeniedError` |
 | `-32002` | Task not cancelable | `tasks/cancel` on a task in a terminal state |
 | `-32003` | Push notifications not supported | config method when server started with `push_notifications=False` |
 | `-32603` | Internal error | `ModuleExecuteError` and any unrecognized exception → fixed `"Internal server error"` ("Internal error" is the JSON-RPC *name* of code -32603, not the emitted message) |
+| `-32040` | *(apcore)* Access denied | `ACLDeniedError` → fixed `"Access denied"`; task reaches `rejected` |
+| `-32041` | *(apcore)* Approval denied | `ApprovalDeniedError` → fixed `"Approval denied"`; task reaches `rejected` |
+| `-32042` | *(apcore)* Approval timed out | `ApprovalTimeoutError` → fixed `"Approval timed out"`; task reaches `rejected` |
 
-> **Sanitization invariant (NFR-SEC-003).** For `-32001` (ACL) and `-32603`
-> (internal) errors, the message MUST NOT contain caller identities, module
-> names, stack traces, file paths, internal variable names, or configuration
-> values. The conformance runner asserts the *absence* of the sensitive
-> substrings supplied in each error case.
+> **Why -32040..-32042 and not a reserved code.** A2A 1.0 reserves `-32001`
+> through `-32009`. JSON-RPC 2.0 leaves `-32000..-32099` to the implementation,
+> so these three sit above A2A's reserved block with room for it to grow —
+> they are the "JSON-RPC custom error" A2A §13.2 names as the example for this
+> binding. apcore distinguishes these three refusals from each other and from
+> every other failure; the binding conveys that distinction rather than
+> collapsing it onto `-32001` (which means "unknown or non-owned task") or
+> `-32603` (which every agent reads as "retry me").
+
+> **Sanitization invariant (NFR-SEC-001).** For the governance codes
+> (`-32040`, `-32041`, `-32042`) and `-32603` (internal) errors, the message
+> MUST NOT contain caller identities, module names, approver identities,
+> approval ids, stack traces, file paths, internal variable names, or
+> configuration values. The conformance runner asserts the *absence* of the
+> sensitive substrings supplied in each error case. What is suppressed is the
+> **detail**; the **class** of refusal is always conveyed, which is what A2A
+> §13.2 requires and what makes the refusal actionable. A deployment may opt
+> into forwarding apcore's own reason via `disclose_refusal_reason`
+> (srs FR-ERR-011, default off) — the fixtures pin the default.
 
 ---
 

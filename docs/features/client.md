@@ -284,6 +284,20 @@ HTTP client for calling remote A2A agents. Provides `A2AClient` for sending mess
         """JSON-RPC -32002: Task is in a terminal state."""
         def __init__(self, state: str | None = None): ...
 
+    class GovernanceRefusedError(A2AClientError):
+        """Base class for the three governance refusals. Terminal: retrying
+        the same call with the same identity cannot succeed."""
+
+    class AccessDeniedError(GovernanceRefusedError):
+        """JSON-RPC -32040: the ACL refused this caller."""
+
+    class ApprovalDeniedError(GovernanceRefusedError):
+        """JSON-RPC -32041: a human explicitly refused this call."""
+
+    class ApprovalTimeoutError(GovernanceRefusedError):
+        """JSON-RPC -32042: the approval expired unanswered. Unlike the other
+        two, a fresh submission may legitimately be approved."""
+
     class A2AServerError(A2AClientError):
         """JSON-RPC -32603: Internal server error."""
         def __init__(self, message: str, code: int = -32603): ...
@@ -298,6 +312,10 @@ HTTP client for calling remote A2A agents. Provides `A2AClient` for sending mess
     class A2ADiscoveryError extends A2AClientError {}   // Agent Card fetch failed
     class TaskNotFoundError extends A2AClientError {}   // -32001; carries { taskId?: string }
     class TaskNotCancelableError extends A2AClientError {} // -32002; carries { state?: string }
+    class GovernanceRefusedError extends A2AClientError {}  // base for the three refusals below
+    class AccessDeniedError extends GovernanceRefusedError {}     // -32040; the ACL refused this caller
+    class ApprovalDeniedError extends GovernanceRefusedError {}   // -32041; a human refused
+    class ApprovalTimeoutError extends GovernanceRefusedError {}  // -32042; the approval expired unanswered
     class A2AServerError extends A2AClientError {}      // -32603; carries { code: number }
     ```
 
@@ -310,10 +328,14 @@ HTTP client for calling remote A2A agents. Provides `A2AClient` for sending mess
         Discovery(String),                               // Agent Card fetch failed
         TaskNotFound { task_id: Option<String> },        // JSON-RPC -32001
         TaskNotCancelable { state: Option<String> },     // JSON-RPC -32002
+        AccessDenied { message: String },                // JSON-RPC -32040
+        ApprovalDenied { message: String },              // JSON-RPC -32041
+        ApprovalTimeout { message: String },             // JSON-RPC -32042
         Server { code: i32, message: String },           // JSON-RPC -32603 (or other codes)
         InvalidUrl(String),                              // malformed client URL
     }
     // A2AClientError::from_jsonrpc(code, message) maps a JSON-RPC error onto a variant.
+    // A2AClientError::is_governance_refusal() -> bool covers the three -3204x variants.
     ```
 
 ---

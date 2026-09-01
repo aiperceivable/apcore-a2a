@@ -458,7 +458,8 @@ Alternative Flow:
       -> Server returns HTTP 401 Unauthorized
       -> Orchestrator refreshes token and retries
   9a. ACL denies access
-      -> Task fails with generic error message (no security info leak)
+      -> Task reaches `rejected` with the fixed message "Access denied"
+         (the class of refusal is conveyed; caller, target and rule are not)
 ```
 
 ---
@@ -693,7 +694,9 @@ serve(registry)
 |-------------|------------------------|----------|
 | `ModuleNotFoundError` | -32601 (Method not found) | Module ID included in message |
 | `SchemaValidationError` | -32602 (Invalid params) | Field-level validation details in `message` |
-| `ACLDeniedError` | -32001 (TaskNotFound) | Details hidden per security policy |
+| `ACLDeniedError` | -32040 (Access denied) | Fixed `"Access denied"`; caller/target/rule suppressed; task reaches `rejected` |
+| `ApprovalDeniedError` | -32041 (Approval denied) | Fixed `"Approval denied"`; approver and approval id suppressed; task reaches `rejected` |
+| `ApprovalTimeoutError` | -32042 (Approval timed out) | Fixed `"Approval timed out"`; task reaches `rejected` |
 | `ModuleExecuteError` | -32603 (Internal error) | Fixed `"Internal server error"` message; original text never surfaced |
 | `ModuleTimeoutError` | -32603 (Internal error) | "Execution timeout" message |
 | `ApprovalPendingError` | *Not an error* | Task transitions to `input_required` |
@@ -707,7 +710,8 @@ serve(registry)
 **Acceptance Criteria:**
 1. Each apcore error type listed above produces a distinct, identifiable JSON-RPC error response.
 2. `SchemaValidationError` responses include field-level error details (field name, error code, message) summarized in the `message` field. (Per the v0.4 decision, JSON-RPC errors are `{code, message}` only -- no `data` field.)
-3. `ACLDeniedError` responses do not leak sensitive security information (no caller_id, target_id, or ACL rule details).
+3. Governance refusals (`ACLDeniedError`, `ApprovalDeniedError`, `ApprovalTimeoutError`) report the *class* of refusal with its own code and a fixed message, and leak no sensitive security information (no caller_id, target_id, approver, approval id, or ACL rule details). Conveying the class is what A2A §13.2 requires — its MUST NOT protects the existence of a resource, not the class of failure — and it is what stops an agent retrying a call that can never succeed. A deployment may opt into forwarding apcore's own reason via `disclose_refusal_reason` (default off).
+3a. `-32001` is reserved for an unknown or non-owned task id, and is never produced for a governance refusal.
 4. Unexpected exceptions produce a generic "Internal server error" message without leaking stack traces, file paths, or internal configuration.
 5. JSON-RPC error objects contain only `code` and `message` (no `data` field); any error type identifier or details are conveyed within `message`.
 6. Error messages never contain internal file paths, stack traces, or sensitive configuration values.
@@ -901,7 +905,7 @@ async for event in client.stream_message(message):
 
 **Title:** Authenticated Agent Card with additional privileged skills
 
-**Description:** Serve an extended Agent Card at an authenticated endpoint that includes additional Skills not visible on the public Agent Card -- specifically modules with ACL restrictions or `requires_approval` annotations.
+**Description:** Serve an extended Agent Card at an authenticated endpoint that includes additional Skills not visible on the public Agent Card -- specifically modules with ACL restrictions, modules gated behind a human approval, and modules in apcore's reserved `system.*` management namespace.
 
 **User Story:** US-009
 
@@ -909,7 +913,7 @@ async for event in client.stream_message(message):
 1. `GET /agent/authenticatedExtendedCard` returns an extended Agent Card.
 2. The extended card includes all public Skills plus Skills marked as requiring authentication.
 3. The endpoint requires valid authentication; returns HTTP 401 without valid credentials.
-4. Modules with `requires_approval` annotation or ACL restrictions appear only in the extended card.
+4. Modules with a `requires_approval` annotation, an ACL rule gating them behind a human (`approval: required`), or an ACL restriction on the anonymous principal appear only in the extended card. A module the ACL **denies** the authenticated caller appears on neither: the extended card filters on the authorization axis of apcore's decision (`check_access().access`), never on the legacy boolean, which folds in the approval axis and would hide the very skills this card exists to carry.
 5. The appropriate Agent Card (public vs extended) is selected by the caller's authentication status. In the Python/TypeScript SDKs this card-fetch RPC is handled by the underlying A2A SDK's request handler — it is not a separately-dispatched apcore-a2a method, so it does not appear in the JSON-RPC dispatch tables (§Tech Design, server-core).
 6. The extended card declares all security schemes the agent supports.
 
@@ -1378,12 +1382,39 @@ apcore Annotations                    A2A Agent Card
 any module has streaming=true   -->   capabilities.streaming = true
 push_notifications enabled      -->   capabilities.pushNotifications = true
 task store supports history     -->   history recording enabled (no 1.0 capability flag)
-requires_approval annotation    -->   input_required state behavior
+readonly                        -->   Skill.tags += "apcore:readonly"
+destructive                     -->   Skill.tags += "apcore:destructive"
+idempotent                      -->   Skill.tags += "apcore:idempotent"
+requires_approval               -->   Skill.tags += "apcore:requires-approval",
+                                      withheld from the public Agent Card,
+                                      and input_required state behavior
+
+ACL rule approval: required     -->   withheld from the public Agent Card
+(apcore >= 0.28.0, §6.1.6)            (no tag: the tag names the annotation)
+
+module id starts with `system.`  -->  withheld from the public Agent Card
+(apcore §6.7 management namespace)    unconditionally — no ACL, annotation or
+                                      sys_modules state can put it back
 ```
 
-> A2A 1.0 `AgentSkill` has no `extensions` field, so the `readonly` / `destructive` /
-> `idempotent` / `open_world` annotations are not mapped onto the Skill. They remain
-> available to clients via the Explorer UI's per-skill enrichment.
+> The annotation and the ACL rule are the two sources apcore `PROTOCOL_SPEC` §6.9
+> composes by **union**. Since apcore 0.28.0 the annotation describes the
+> *module*, not the call, so `apcore:requires-approval` reads "this module always
+> needs a human" and its absence reads "the module declares none" — not "this call
+> will run unattended". The per-call answer comes from apcore's `validate()`.
+
+> A2A 1.0 `AgentSkill` is `{id, name, description, tags, examples, inputModes,
+> outputModes, securityRequirements}` — it has neither an `extensions` nor a
+> `metadata` field, and in the Python binding the type is generated from the A2A
+> protobuf schema, so a vendor member cannot be added at all. `tags` is therefore
+> the only carrier available, and the four behavioral annotations ride there under
+> a reserved `apcore:` prefix that keeps them out of the module's own flat tag
+> namespace (srs FR-SKL-004). Only `true` flags are emitted, so absence means
+> "not asserted", never "asserted false".
+>
+> The remaining annotations (`open_world`, `cacheable`, `paginated`, …) are not
+> promoted to tags — they are advisory or already represented elsewhere on the
+> card — and stay available through the Explorer UI's per-skill enrichment.
 
 #### A.4 apcore Execution --> A2A Task Lifecycle
 
@@ -1396,7 +1427,9 @@ executor.call_async() success   -->   status.state = "completed"
 executor.call_async() error     -->   status.state = "failed"
 ApprovalPendingError            -->   status.state = "input_required"
 CancelToken.cancel()            -->   status.state = "canceled"
-ACLDeniedError                  -->   status.state = "failed" (generic message)
+ACLDeniedError                  -->   status.state = "rejected" ("Access denied")
+ApprovalDeniedError             -->   status.state = "rejected" ("Approval denied")
+ApprovalTimeoutError            -->   status.state = "rejected" ("Approval timed out")
 executor.stream() chunk         -->   TaskArtifactUpdateEvent (append: true)
 executor.stream() complete      -->   TaskStatusUpdateEvent (completed)
 ```
@@ -1408,7 +1441,9 @@ apcore Error                          A2A JSON-RPC Error
 ========================              ========================
 ModuleNotFoundError             -->   -32601 (Method not found)
 SchemaValidationError           -->   -32602 (Invalid params)
-ACLDeniedError                  -->   -32001 (TaskNotFound, hide details)
+ACLDeniedError                  -->   -32040 (Access denied, detail suppressed)
+ApprovalDeniedError             -->   -32041 (Approval denied, detail suppressed)
+ApprovalTimeoutError            -->   -32042 (Approval timed out, detail suppressed)
 ModuleExecuteError              -->   -32603 (Internal error)
 ModuleTimeoutError              -->   -32603 (Internal error)
 InvalidInputError               -->   -32602 (Invalid params)
@@ -1523,6 +1558,8 @@ annotations.open_world: bool
 ModuleNotFoundError(module_id)
 SchemaValidationError(message, errors)
 ACLDeniedError(caller_id, target_id)
+ApprovalDeniedError(module_id)
+ApprovalTimeoutError(module_id)
 ModuleTimeoutError(module_id, timeout_ms)
 InvalidInputError(message)
 CallDepthExceededError(depth, max_depth, call_chain)
