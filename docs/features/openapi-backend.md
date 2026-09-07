@@ -660,11 +660,22 @@ that code, and porting it faithfully would reproduce all four.
 | **`timeout` configures two different things.** Python/TS apply it to the spec fetch (spec-conformant); Rust applies it to the *writer*, i.e. the per-call proxy timeout, and never to the fetch | [apcore-mcp-rust#9](https://github.com/aiperceivable/apcore-mcp-rust/issues/9) | `timeout` is the spec-fetch timeout in all three, per the table above. A proxy timeout, if ever needed, gets its own key |
 | **The Config-Bus route ignores `project_root` in TS and Rust.** Neither `build_*_from_config` sets it, so a relative `spec` silently resolves against the CWD — contradicting FR-OAS-004 rule 3 on the one route most deployments use | [apcore-mcp#19](https://github.com/aiperceivable/apcore-mcp/issues/19) | Resolve `project_root` from `Config` inside the config route in all three SDKs, as apcore-mcp's Python does |
 
-These are reported upstream rather than only worked around here; the entries stay until apcore-mcp
-closes them, so a future reader can tell a deliberate difference from drift. Two of the four are
-violations of apcore-mcp's own specification rather than of a preference of this binding: its
-`openapi-backend.md` §Configuration documents `timeout` as "Spec fetch only; not the per-call proxy
-timeout" and `--openapi-header` as "Spec fetch only".
+Two of the four were violations of apcore-mcp's own specification rather than of a preference of
+this binding: its `openapi-backend.md` §Configuration documents `timeout` as "Spec fetch only; not
+the per-call proxy timeout" and `--openapi-header` as "Spec fetch only".
+
+!!! success "All four are fixed upstream as of apcore-mcp 0.21.0 — the divergence is closed"
+    Reported rather than only worked around here, and apcore-mcp repaired all four: the four
+    issues linked above are closed, and the fixes are visible in its source (`OpenAPIBackendOptions`
+    now carries `headers`, the TypeScript backend converts seconds to milliseconds at the `loadSpec`
+    boundary, and the Config Bus route resolves `Config::project_root`).
+
+    **The table is kept rather than deleted.** It no longer describes a live difference between the
+    two bindings; it describes four defects this binding had to decide about before the sibling had
+    an answer, and the decisions it lists are still the ones implemented here. Deleting it would
+    lose the reason a reader finds, say, a `Math.round(timeout * 1000)` at this call site and
+    wonders whether it is a workaround for something. It is not a workaround — it is the correct
+    unit conversion, and both bindings now do it.
 
 ---
 
