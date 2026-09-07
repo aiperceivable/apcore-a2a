@@ -1850,9 +1850,61 @@ Explorer GET endpoints are exempt from JWT authentication. POST endpoints (messa
 - `2`: Runtime error (server crash, unrecoverable failure).
 
 **Validation:**
+- If no backend source is named — neither `--extensions-dir`, nor `--from-openapi`, nor an `apcore-a2a.openapi.spec` in the config: exit **2**, a usage error. All three bindings implement the same two tiers (`2` the command line is wrong, `1` the environment is), which they did not before 0.7.0 — see [cli.md § Exit Codes](../features/cli.md#exit-codes).
 - If `--extensions-dir` does not exist: exit 1 with `"Extensions directory not found: {path}"`.
 - If no modules discovered: exit 1 with `"No modules discovered in {path}"`.
 - If `--auth-type bearer` without `--auth-key`: exit 1 with `"--auth-key is required when --auth-type is bearer"`.
+
+---
+
+### 4.10 OpenAPI Backend (`openapi_backend`)
+
+Feature [F-12](../features/openapi-backend.md), SRS §3.16 `FR-OAS-001`…`006`. The fourth backend
+source. Full design in the feature spec; this section records the structure and the two decisions
+that constrain the rest of the system.
+
+**Pipeline.** `load_spec` → `OpenAPIScanner.scan` → *repairs* → `HTTPProxyRegistryWriter.write` →
+`Registry`. Every stage but the repairs lives in apcore-toolkit. Downstream — `SkillMapper`,
+`SchemaConverter`, `AgentCardBuilder`, card visibility, ACL, approval, `Executor` — is the code that
+already serves an extensions directory, unmodified.
+
+**Where it attaches per SDK.** Rust gains a `BackendSource::OpenApi` variant whose `resolve_backend`
+arm returns `(Arc<Executor>, Some(Arc<Registry>))` — the owned `Arc<Registry>` is not optional,
+because `apcore::register_sys_modules` takes an owned Arc while `Executor::registry()` yields only a
+reference, so returning `None` there would silently cost `system.*` registration. Python and
+TypeScript have no `BackendSource` type; the backend returns a `Registry` that flows into the
+existing duck-typed `_resolve_registry_and_executor` / `resolveRegistryAndExecutor` path.
+
+**The two repairs, and why the backend cannot be a thin scan-then-write call.**
+
+| Repair | Without it |
+|---|---|
+| `FR-OAS-002` module ID projection | apcore-toolkit derives IDs into `[A-Za-z0-9_.-]`; apcore's `Registry` accepts `^[a-z][a-z0-9_]*(\.[a-z][a-z0-9_]*)*$`. Measured on apcore 0.30.0 / toolkit 0.11.1: only 2 of 9 realistic operation shapes register, and the canonical Swagger Petstore registers **nothing** — scanning succeeds, the Agent Card is empty, and nothing raises |
+| `FR-OAS-003` empty-description repair | The scanner yields `""` for an operation with no `summary`/`description`, and `AgentCardBuilder` skips empty-description modules. 80 operations, 30 undocumented → 50 skills, no diagnostic |
+
+Both run inside the scanner's `transform_module` hook, in the order **caller hook → description
+repair → projection**. The projection is last so the "every registered ID is apcore-legal" invariant
+holds whatever a caller's hook returns, and it must run inside the hook so that it precedes the
+scanner's own `deduplicate_ids` — lowercasing can *create* a collision (`listPets` + `listpets`) that
+deduplication must then see. Because a hook returning nothing drops a module **silently**, reporting
+what was dropped is the backend's job, not the scanner's.
+
+**Diagnostics report post-projection IDs.** The description-repair INFO line names the IDs that
+reach the Agent Card. Naming the pre-projection ID sends the operator looking for a skill that does
+not exist — found and fixed during implementation.
+
+**Configuration.** A nested `apcore-a2a.openapi` section, the namespace's first (its five existing
+keys are all scalars) and its first path-typed key. apcore 0.30.0's §9.2.1/§9.2.2 protections do
+**not** reach it: `Config.path_typed_keys()` is a fixed tuple of apcore's own five keys and, verified
+empirically, does not change when a namespace carrying a path-valued default is registered. The
+backend owns the three resolution rules itself (`FR-OAS-004`).
+
+**Governance.** Scanned write operations reach the *public* Agent Card by default, because the
+scanner never infers `requires_approval` and the 0.6.0 public-card filter subtracts only ACL-denied
+and approval-gated skills. They are **not** withheld as a class — unlike `system.*`, they are the
+operator's own modules — so the answer is `FR-OAS-005`'s startup warning, which follows apcore's own
+rule that a governance accessor reports the absence of a gate and never the presence of protection.
+An attached ACL therefore never suppresses it.
 
 ---
 
@@ -3260,12 +3312,12 @@ def client(a2a_app):
 
     [project]
     name = "apcore-a2a"
-    version = "0.6.0"
+    version = "0.7.0"
     requires-python = ">=3.11"
     license = "Apache-2.0"
     dependencies = [
-        "apcore>=0.28.0",
-        "apcore-toolkit>=0.10.2",
+        "apcore>=0.30.0",
+        "apcore-toolkit>=0.11.1",
         "a2a-sdk[http-server]>=1.0.0",
         "starlette>=0.40.0",
         "uvicorn>=0.30.0",
@@ -3274,6 +3326,11 @@ def client(a2a_app):
     ]
 
     [project.optional-dependencies]
+    # F-12 fetches a spec over http(s) and registers each operation as an HTTP
+    # proxy, both behind apcore-toolkit's own extra.
+    openapi = [
+        "apcore-toolkit[http-proxy]>=0.11.1",
+    ]
     dev = [
         "pytest>=7.0",
         "pytest-asyncio>=0.21",
@@ -3311,7 +3368,7 @@ def client(a2a_app):
     // package.json (ESM, Node >=18)
     {
       "name": "apcore-a2a",
-      "version": "0.6.0",
+      "version": "0.7.0",
       "type": "module",
       "license": "Apache-2.0",
       "main": "./dist/index.js",
@@ -3320,8 +3377,8 @@ def client(a2a_app):
       "engines": { "node": ">=18.0.0" },
       "dependencies": {
         "@a2a-js/sdk": ">=1.0.1",
-        "apcore-js": ">=0.28.0",
-        "apcore-toolkit": ">=0.10.2",
+        "apcore-js": ">=0.30.0",
+        "apcore-toolkit": ">=0.11.1",
         "express": "^5.1.0",
         "jsonwebtoken": "^9.0.3",
         "uuid": "^13.0.0"
@@ -3352,14 +3409,14 @@ def client(a2a_app):
     # Cargo.toml (edition 2021)
     [package]
     name = "apcore-a2a"
-    version = "0.6.0"
+    version = "0.7.0"
     edition = "2021"
     license = "Apache-2.0"
     description = "A2A protocol adapter for apcore — expose apcore modules as A2A agents"
 
     [dependencies]
-    apcore = ">=0.28, <0.29"
-    apcore-toolkit = ">=0.10.2"
+    apcore = ">=0.30"
+    apcore-toolkit = ">=0.11.1"
     axum = { version = "0.8", features = ["ws"] }
     tokio = { version = "1", features = ["full"] }
     tokio-stream = "0.1"
@@ -3387,15 +3444,28 @@ def client(a2a_app):
     path = "src/bin/apcore-a2a.rs"
     ```
 
-    `apcore` carries an upper bound while the other pins do not. apcore 0.27's own
-    breaking-change list was incomplete — `Registry::describe` changed its return
-    *value* as well as its signature — so a caret range would let the next minor in
-    unannounced. 0.28 vindicated the bound: it added a required `approval` field to
-    `ACLRule`, which a struct literal cannot skip, and changed what `ACL::check`
-    returns for an allowed-but-gated call — a source break and a silent semantic
-    one, in a minor. Rust is also the only SDK whose lockfile is gitignored (library
-    crate) and whose CI does not pass `--locked`, so the range in `Cargo.toml` is
-    the only thing holding the floor.
+    `apcore` carried an upper bound (`>=0.28, <0.29`) through 0.6.0, and the reason
+    was sound: apcore 0.27's own breaking-change list was incomplete — `Registry::describe`
+    changed its return *value* as well as its signature — and 0.28 added a required
+    `approval` field to `ACLRule`, which a struct literal cannot skip, plus a silent
+    change to what `ACL::check` returns for an allowed-but-gated call. Two minors,
+    two unannounced breaks.
+
+    **The bound is dropped as of 0.7.0**, because apcore 0.29.0 removed the mechanism
+    that made those breaks silent: `ACLRule` is now `#[non_exhaustive]`, so a future
+    field cannot reach a downstream struct literal at all, and apcore-rust states
+    outright that 0.29.0 is the last release in which adding a field to a rule costs
+    downstream a compile error. That is what the upper bound was buying, and the
+    attribute buys it more cheaply — an upper bound also has to be relaxed by hand
+    for every apcore minor, which is a per-release chore that 0.7.0 itself performed.
+
+    The migration cost is real and was paid once: 0.29's `#[non_exhaustive]` broke
+    six `ACLRule` struct literals in `tests/integration.rs`, now built through
+    `ACLRule::new(callers, targets, effect)` with the optional fields assigned after.
+    Rust remains the only SDK whose lockfile is gitignored (library crate) and whose
+    CI does not pass `--locked`, so the range in `Cargo.toml` is still the only thing
+    holding the floor — which is why the floor itself moves with every release that
+    needs it.
 
 ### 13.3 Docker Setup
 

@@ -42,6 +42,7 @@ nav:
       - CLI: features/cli.md
       - Explorer: features/explorer.md
       - Ops: features/ops.md
+      - OpenAPI Backend: features/openapi-backend.md
   - Specifications:
       - Product Requirements (PRD): spec/prd.md
       - Technical Design: spec/tech-design.md

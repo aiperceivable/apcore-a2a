@@ -23,7 +23,7 @@ You need an existing apcore project with at least one module defined:
     pip install apcore-a2a
     ```
 
-    Requires Python 3.11+ and `apcore` 0.28.0+.
+    Requires Python 3.11+ and `apcore` 0.30.0+.
 
 === "TypeScript"
 
@@ -33,7 +33,7 @@ You need an existing apcore project with at least one module defined:
     pnpm add apcore-a2a
     ```
 
-    Requires Node.js 18+ and `apcore-js` 0.28.0+.
+    Requires Node.js 18+ and `apcore-js` 0.30.0+.
 
 === "Rust"
 
@@ -49,7 +49,75 @@ You need an existing apcore project with at least one module defined:
     tokio = { version = "1", features = ["full"] }
     ```
 
-    Requires Rust 1.75+ (edition 2021) and `apcore` 0.28+.
+    Requires Rust 1.75+ (edition 2021) and `apcore` 0.30+.
+
+---
+
+## Serving an OpenAPI document instead
+
+You do not need an apcore project at all. Point apcore-a2a at an OpenAPI 3.0/3.1 document and
+every operation becomes an A2A Skill, proxied over HTTP to the API that published it:
+
+```bash
+apcore-a2a serve --from-openapi https://petstore3.swagger.io/api/v3/openapi.json \
+                 --openapi-prefix petstore
+```
+
+Install the extra first — the spec fetch and the HTTP proxy live behind it:
+
+=== "Python"
+
+    ```bash
+    pip install "apcore-a2a[openapi]"
+    ```
+
+=== "TypeScript"
+
+    ```bash
+    npm install apcore-a2a apcore-toolkit
+    ```
+
+=== "Rust"
+
+    ```bash
+    cargo add apcore-a2a --features openapi
+    ```
+
+!!! danger "Read this before pointing it at an API that can change things"
+    An OpenAPI document describes an API's *shape*. It says nothing about the *consequences*
+    of calling an operation, so apcore-toolkit never infers `requires_approval` — a
+    `POST /charges` that moves money is annotated exactly like a `POST /echo`.
+
+    Since 0.6.0 the public Agent Card subtracts only skills an anonymous caller may not
+    invoke and skills carrying an approval requirement. A scanned write operation is
+    neither, so **it is advertised on `/.well-known/agent-card.json`, which is served
+    without authentication**. apcore-a2a warns about this at startup; the warning is not
+    suppressed by merely attaching an ACL.
+
+    The recommended shape sets a `prefix` and denies by default, which closes both the
+    invocation gap and the discovery exposure:
+
+    ```yaml
+    apcore-a2a:
+      openapi:
+        spec: "https://api.example.com/openapi.json"
+        prefix: petstore
+      acl:
+        default_effect: deny
+        rules:
+          - callers: ["@external"]
+            targets: ["petstore.pets.get"]
+            effect: allow
+          - callers: ["@external"]
+            targets: ["petstore.*"]
+            effect: deny
+    ```
+
+    A prefixed catch-all deny holds no matter what the upstream API renames. An allow-list
+    of operation names fails *closed* when an ID changes, which is the safe direction.
+
+See [OpenAPI Backend](features/openapi-backend.md) for the full feature, including the
+module-ID projection and what happens to operations your document does not document.
 
 ---
 

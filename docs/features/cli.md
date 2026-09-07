@@ -42,9 +42,42 @@ explorer, metrics, and similar options are configured via code/env instead).
 
         # --- serve subcommand ---
         serve_parser = subparsers.add_parser("serve", help="Start A2A server")
+        # Not `required=True` since 0.7.0: `--from-openapi` is the alternative
+        # backend source. One of the two is required, and supplying neither is a
+        # usage error (exit 2), which is what argparse produced when this flag
+        # carried `required=True`.
         serve_parser.add_argument(
-            "--extensions-dir", required=True,
+            "--extensions-dir", default=None,
             help="Path to directory containing apcore module extensions",
+        )
+        # --- OpenAPI backend (F-12), 0.7.0 ---
+        serve_parser.add_argument(
+            "--from-openapi", default=None, dest="from_openapi",
+            help="OpenAPI 3.0/3.1 spec URL or path; every operation becomes a Skill",
+        )
+        serve_parser.add_argument(
+            "--openapi-base-url", default=None, dest="openapi_base_url",
+            help="Base URL for proxied requests (default: the document's servers[0].url)",
+        )
+        serve_parser.add_argument(
+            "--openapi-prefix", default=None, dest="openapi_prefix",
+            help="Prepended to every derived module ID; required alongside --extensions-dir",
+        )
+        serve_parser.add_argument(
+            "--openapi-include", default=None, dest="openapi_include",
+        )
+        serve_parser.add_argument(
+            "--openapi-exclude", default=None, dest="openapi_exclude",
+        )
+        serve_parser.add_argument(
+            "--openapi-header", action="append", default=None,
+            dest="openapi_headers", metavar="KEY:VALUE",
+            help="Header for the spec fetch only; repeatable. Never sent on proxied calls",
+        )
+        serve_parser.add_argument(
+            "--openapi-no-deprecated", action="store_true",
+            dest="openapi_no_deprecated",
+            help="Skip operations marked deprecated: true",
         )
         serve_parser.add_argument(
             "--host", default="127.0.0.1",
@@ -130,12 +163,15 @@ explorer, metrics, and similar options are configured via code/env instead).
 === "TypeScript"
 
     The TypeScript CLI (`src/cli.ts`, bin `apcore-a2a`) registers a `serve`
-    subcommand whose flags mirror the Python set: `--extensions-dir` (required),
+    subcommand whose flags mirror the Python set: `--extensions-dir`,
     `--host` (127.0.0.1), `--port` (8000), `--name`, `--description`,
     `--version-str`, `--url`, `--auth-type bearer`, `--auth-key`,
     `--auth-issuer`, `--auth-audience`, `--push-notifications`, `--explorer`,
-    `--cors-origins`, `--execution-timeout` (300), `--log-level` (info), and
-    `--metrics`. It exports `main()` and `resolveAuthKey()`.
+    `--cors-origins`, `--execution-timeout` (300), `--log-level` (info),
+    `--metrics`, and the seven F-12 flags (`--from-openapi`,
+    `--openapi-base-url`, `--openapi-prefix`, `--openapi-include`,
+    `--openapi-exclude`, `--openapi-header`, `--openapi-no-deprecated`). It
+    exports `main()`, `resolveAuthKey()` and `parseOpenapiHeaders()`.
 
     ```typescript
     // src/cli.ts — entry point, invoked as `npx apcore-a2a serve ...`
@@ -147,23 +183,37 @@ explorer, metrics, and similar options are configured via code/env instead).
 
 === "Rust"
 
-    The Rust CLI is a clap `Cli` struct with no `serve` subcommand. Only
-    `-e/--extensions-dir`, `-n/--name`, `--url`, and `-p/--port` are exposed.
-    Auth, explorer, metrics, CORS, push notifications, execution timeout, and
-    log level are not CLI flags — configure them via code/env instead.
+    The Rust CLI is a clap `Cli` struct with no `serve` subcommand. It exposes
+    `-e/--extensions-dir`, `-n/--name`, `--url`, `-p/--port` and the seven F-12
+    `--openapi-*` flags. Auth, explorer, metrics, CORS, push notifications,
+    execution timeout, and log level are not CLI flags — configure them via
+    code/env instead.
+
+    Two 0.7.0 changes: `--extensions-dir` lost its `./extensions` default and is
+    now `Option`, since `--from-openapi` is an alternative source and a bare
+    invocation should not silently serve a directory the operator never named;
+    and **`--port` was inert before 0.7.0** — `run()` built its config with
+    `..Default::default()` and never copied the parsed value, so the server bound
+    `0.0.0.0:8000` whatever was typed. `--url` now follows `--port` as well
+    (defaulting to `http://localhost:<port>`), because fixing the bind alone
+    would have left the Agent Card advertising a socket the server does not bind.
 
     ```rust
     #[derive(Parser)]
     #[command(name = "apcore-a2a", version, about = "A2A protocol adapter for apcore")]
     pub struct Cli {
-        #[arg(short, long, default_value = "./extensions")] pub extensions_dir: String,
+        #[arg(short, long)] pub extensions_dir: Option<String>,
+        #[arg(long)] pub from_openapi: Option<String>,
+        #[arg(long)] pub openapi_prefix: Option<String>,
+        // ... --openapi-base-url / -include / -exclude / -header / -no-deprecated
         #[arg(short, long, default_value = "apcore-a2a")] pub name: String,
-        #[arg(long, default_value = "http://localhost:8000")] pub url: String,
+        #[arg(long)] pub url: Option<String>,
         #[arg(short, long, default_value_t = 8000)] pub port: u16,
     }
 
-    pub fn run() -> Result<(), Box<dyn std::error::Error>> {
-        // parse Cli, build the backend from extensions_dir, then call serve(..).
+    pub async fn run() -> Result<(), Box<dyn std::error::Error>> {
+        // parse Cli, build the backend from extensions_dir and/or from_openapi
+        // into ONE registry (so the collision preflight sees both), then serve.
     }
     ```
 
@@ -297,11 +347,61 @@ except Exception as e:
 
 ## Exit Codes
 
-| Code | Meaning |
-|------|---------|
-| `0` | Clean shutdown (SIGINT/SIGTERM/KeyboardInterrupt) |
-| `1` | Configuration error (invalid args, missing dir, zero modules, missing auth key) |
-| `2` | Runtime error (unrecoverable server crash) |
+| Code | Meaning | Retryable? |
+|------|---------|---|
+| `0` | Clean shutdown (SIGINT/SIGTERM/KeyboardInterrupt) | — |
+| `1` | **Configuration or runtime error.** The command line was well-formed; the environment it named was not — a missing extensions directory, zero modules discovered, an unresolvable OpenAPI spec, a missing auth key, an unreachable spec host | **Yes.** The world can become ready |
+| `2` | **Usage error.** The command line itself is wrong — no backend source named, an unknown flag, a flag missing its value, a malformed `--openapi-header` | **No.** Retrying it unchanged will always fail |
+
+All three bindings implement both tiers, and `2` is the code `argparse`, `clap` and GNU
+`getopt` all use for a usage fault, so the bindings agree with each other and with the tools
+around them.
+
+!!! note "This was a genuine defect until 0.7.0, not a language difference"
+    Measured before the fix: Python exited `2` for both usage faults (argparse) and `1` for a
+    configuration fault — correct. TypeScript collapsed everything onto `1`, losing the
+    distinction entirely. **Rust disagreed with itself**: `apcore-a2a --bogus` exited `2`
+    because clap caught it, while `apcore-a2a` with no backend source exited `1` because the
+    hand-written check did — the same class of mistake, two codes, decided by which layer
+    noticed first.
+
+    The tiers are worth keeping apart because a supervisor or CI job can act on them: retry on
+    `1`, never on `2`. Collapsing them onto one code throws that away, and aligning *downward*
+    to `1` would have meant overriding `ArgumentParser.error()` so that Python's unknown-flag
+    handling diverged from every other Python CLI.
+
+### Unrecognized arguments
+
+All three bindings refuse an argument the flag table does not define, and exit `2`.
+
+!!! danger "TypeScript silently ignored them until 0.7.0, and the failure widened exposure"
+    Measured, with a one-letter typo:
+
+    ```
+    apcore-a2a serve --extensions-dir ./ext --openapi-exclde 'secret.*'
+      values:      { "openapi-exclde": true, … }   ← the flag became a boolean
+      positionals: [ "serve", "secret.*" ]         ← its value became a positional
+    ```
+
+    The exclusion did not apply, and every operation it was meant to hold back was scanned,
+    registered, and published to the **public Agent Card** — a route served without
+    authentication and built to be crawled. The server started and reported success.
+
+    Python (`unrecognized arguments`) and Rust (`unexpected argument … found`) both refused the
+    same argv and exited `2`, so the tolerant behaviour was never portable: a deployment could
+    only have depended on it in TypeScript, and the command it depended on was already failing
+    in the other two bindings.
+
+    Fixed by an explicit check, **not** by `strict: true`. `strict: false` is kept deliberately
+    — it is what lets the CLI tolerate `--metrics=x` for a boolean and a repeat of a
+    non-`multiple` option, and `strict: true` would turn both into throws. The check is scoped
+    to the case that is actually dangerous: a spelling no binding recognises.
+
+!!! note "argparse additionally accepts unambiguous abbreviations"
+    `--openapi-exclud` (one letter short) is a legal spelling in Python, because argparse
+    resolves unambiguous prefixes. That is an argparse feature, not a parity requirement —
+    clap does not do it, and TypeScript does not either. The shared contract is only that a
+    spelling *no* binding recognises is refused rather than ignored.
 
 ---
 
@@ -334,6 +434,20 @@ except Exception as e:
       --cors-origins "https://app.example.com" \
       --log-level info
 
+    # Serve an OpenAPI document instead of an extensions directory (F-12)
+    apcore-a2a serve \
+      --from-openapi https://petstore3.swagger.io/api/v3/openapi.json \
+      --openapi-prefix petstore
+
+    # Both sources at once — --openapi-prefix is REQUIRED here, or a derived
+    # module ID can collide with a project module ID
+    apcore-a2a serve \
+      --extensions-dir ./extensions \
+      --from-openapi ./openapi.json \
+      --openapi-prefix petstore \
+      --openapi-header "X-Api-Key: $PETSTORE_SPEC_KEY" \
+      --openapi-no-deprecated
+
     # Show version
     apcore-a2a --version
     ```
@@ -343,6 +457,11 @@ except Exception as e:
     ```bash
     # Minimal
     npx apcore-a2a serve --extensions-dir ./extensions
+
+    # OpenAPI document as the backend source (F-12)
+    npx apcore-a2a serve \
+      --from-openapi https://petstore3.swagger.io/api/v3/openapi.json \
+      --openapi-prefix petstore
 
     # With auth
     npx apcore-a2a serve --extensions-dir ./ext --auth-type bearer --auth-key $APCORE_JWT_SECRET

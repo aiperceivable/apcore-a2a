@@ -1057,14 +1057,35 @@ apcore-a2a serve --extensions-dir ./extensions --push-notifications
 
 ---
 
+#### FR-020: OpenAPI Backend
+
+**Title:** An OpenAPI 3.0/3.1 document as a backend source
+
+**Description:** Point apcore-a2a at an OpenAPI document and every operation in it becomes an A2A Skill on the Agent Card, proxied over HTTP to the API that published the document — with no apcore project on the other end at all. The scanner and the HTTP proxy writer ship in apcore-toolkit 0.11.0; this feature is the link that composes them into a Registry the existing adapter serves unchanged. apcore-cli (FE-15a) and apcore-mcp both already consume the same scanner.
+
+**Acceptance Criteria:**
+1. A spec URL or filesystem path yields a populated Registry, with one skill per operation.
+2. Derived module IDs are projected into apcore's registry alphabet; an operation that cannot be projected is dropped with a warning naming it. Without this the canonical Swagger Petstore registers nothing.
+3. An operation with no `summary` or `description` receives a synthesized `{METHOD} {path}` description, so it is not silently dropped by the Agent Card builder.
+4. A relative spec path resolves against the project root; a URL is used verbatim; a set-but-empty value is discarded rather than resolving to the working directory.
+5. A startup warning names scanned write operations (POST/PUT/PATCH/DELETE) that carry no approval requirement and will therefore be advertised on the unauthenticated public Agent Card. It is not suppressed by the mere presence of an ACL.
+6. A derived ID colliding with a module already in the registry fails at startup, naming every collision, and leaves the registry unchanged.
+7. Combining an OpenAPI source with an extensions directory requires a `prefix`.
+
+**Dependencies:** FR-001, FR-002, FR-003
+
+**Priority:** P1
+
+---
+
 **Feature Count Summary:**
 
 | Priority | Count | Features |
 |----------|-------|----------|
 | P0       | 11    | FR-001 through FR-011 |
-| P1       | 5     | FR-012 through FR-016 |
+| P1       | 6     | FR-012 through FR-016, FR-020 |
 | P2       | 3     | FR-017 through FR-019 |
-| **Total**| **19**|                        |
+| **Total**| **20**|                        |
 
 ---
 

@@ -21,6 +21,7 @@ This directory contains implementation-level feature specifications for **apcore
 | [cli](cli.md) | P1 | public-api | CLI entry point for launching A2A servers |
 | [explorer](explorer.md) | P2 | server-core | Browser-based interactive UI for testing agents |
 | [ops](ops.md) | P2 | server-core | Health, metrics, and dynamic module registration |
+| [openapi-backend](openapi-backend.md) | P1 | public-api, adapters | Fourth backend source — an OpenAPI 3.0/3.1 document becomes A2A Skills, proxied over HTTP |
 
 ## Dependency Graph
 

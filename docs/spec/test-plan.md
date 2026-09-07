@@ -2168,6 +2168,163 @@ schema = {
 
 ---
 
+### 8.4 TC-OAS: OpenAPI Backend
+
+Feature [F-12](../features/openapi-backend.md), SRS §3.16. Shared corpus:
+`conformance/fixtures/openapi_backend.json` (24 cases). These entries name the cases whose
+absence would let a defect ship silently; the corpus itself carries the full set.
+
+!!! danger "A conformance runner MUST fail on a missing or empty case group"
+    This is a requirement on the **runners**, not on the implementations, and it applies to every
+    fixture in this repository rather than only to this one.
+
+    A runner that reads a group through a fallback — `fixture?.group ?? []`,
+    `unwrap_or_default()`, `.get(group, [])` — iterates zero cases and reports success the moment
+    that group is renamed or removed upstream. The suite then guards nothing while looking healthy,
+    which is worse than having no suite at all, because it is believed.
+
+    Measured on 2026-09-07 by renaming `test_cases` in this fixture: apcore-a2a-python failed at
+    collection with a `KeyError` because it indexes the key directly; **apcore-a2a-typescript
+    silently dropped from 46 passing tests to 33, and apcore-a2a-rust reported 9 passing while
+    asserting nothing.** Both have since been given a `cases()` helper that raises on an absent or
+    empty group.
+
+    Failing to find the **spec repo at all** is a separate and legitimate case — every runner skips
+    the suite then, because a checkout without it is a normal local state. The distinction is
+    between "the contract is not here" and "the contract is here and has the wrong shape".
+
+---
+
+#### TC-OAS-001: A derived module ID is projected into apcore's registry alphabet
+
+| Field | Value |
+|-------|-------|
+| **ID** | TC-OAS-001 |
+| **Priority** | P0 |
+| **SRS Trace** | FR-OAS-002 |
+
+**Preconditions:** An OpenAPI 3.0 document whose operations exercise the four shapes: a camelCase `operationId` (`listPets`), a hyphenated one (`pet-store.items.get`), a path-derived id, and one whose derived id has a segment beginning with a digit (`/v1/2fa`).
+
+**Test Steps:**
+1. Build a registry through the backend; assert the registered ids are the projected forms (`listpets`, `pet_store.items.get`, …).
+2. Assert the `2fa` operation is **absent** from the registry.
+3. Assert a WARNING was emitted naming both the derived id `v1.2fa.get` **and** the offending segment `2fa`. Remove the derived id from the line first, then assert the segment is still named.
+4. Assert the sibling operation in the same document still registered.
+5. Scan a document containing both `listPets` and `listpets`; assert ids `listpets` and `listpets_2`, the second carrying a rename warning.
+
+**Expected Result:** every registered id matches `^[a-z][a-z0-9_]*(\.[a-z][a-z0-9_]*)*$`; one drop, reported; one document-level collision, renamed by the scanner.
+
+**Why this case exists:** apcore-toolkit sanitizes derived ids into `[A-Za-z0-9_.-]` and apcore's `Registry` accepts a strictly narrower alphabet. Measured against apcore 0.30.0 / apcore-toolkit 0.11.1, **only two of nine realistic operation shapes register unrepaired and the canonical Swagger Petstore registers nothing** — it scans cleanly, the server starts, and the Agent Card has zero skills, with nothing raised anywhere. Step 3's subtraction is load-bearing: `"2fa"` is a substring of `"v1.2fa.get"`, so asserting both against one line passes even when the segment is never named, and the operator is then told *that* an operation was dropped but not *why*. Step 5 pins the ordering — the projection must run before the scanner's own deduplication, because lowercasing is what *creates* that collision.
+
+---
+
+#### TC-OAS-002: An undocumented operation still reaches the Agent Card
+
+| Field | Value |
+|-------|-------|
+| **ID** | TC-OAS-002 |
+| **Priority** | P0 |
+| **SRS Trace** | FR-OAS-003 |
+
+**Preconditions:** A document with one operation carrying neither `summary` nor `description`, one carrying a whitespace-only `summary`, and one carrying a real multi-line `description`.
+
+**Test Steps:**
+1. Assert the first two register with the synthesized description `{METHOD} {url_path}` (e.g. `DELETE /pets/{petId}`).
+2. Assert the third keeps the first line of its own description, untouched.
+3. Assert exactly one INFO line reports the synthesis, and that it names the **post-projection** id.
+4. Assert all three appear on the Agent Card.
+
+**Expected Result:** no operation is lost; the report names the ids the card actually carries.
+
+**Why this case exists:** the scanner yields `""` for an undocumented operation and `AgentCardBuilder` skips empty-description modules — two individually correct behaviours that compose into a silent loss (80 operations, 30 undocumented, 50 skills, no diagnostic). Step 3 must be scoped to the synthesis line: apcore-toolkit's writer emits its own `Registered HTTP proxy: <projected id>` line, so a bare "the id appears somewhere in the log" assertion is satisfied by that and passes even when the report names the pre-projection id — an id that is not on the card and that the operator will search for in vain.
+
+---
+
+#### TC-OAS-003: The unapproved-write warning survives a permissive ACL
+
+| Field | Value |
+|-------|-------|
+| **ID** | TC-OAS-003 |
+| **Priority** | P0 |
+| **SRS Trace** | FR-OAS-005 |
+
+**Preconditions:** A document with one `POST` operation. Four runs: no ACL; a read-only document; `acknowledge_unapproved_writes: true`; and an attached ACL of `{callers: ["*"], targets: ["*"], effect: "allow"}` with `default_effect: allow`.
+
+**Test Steps:**
+1. No ACL → assert a WARNING naming the public Agent Card and its path.
+2. Read-only document → assert silence.
+3. Acknowledgement set → assert silence.
+4. **Permissive ACL attached → assert the warning still fires.**
+
+**Expected Result:** fires in runs 1 and 4; silent in 2 and 3.
+
+**Why this case exists:** run 4 is the discriminating one. apcore's own `GovernanceState.unprotected_control_surface` reports *the absence of a gate, never the presence of protection* — a wired ACL that permits every call still yields false. An implementation that suppresses this warning on `governance_state().acl_configured` passes runs 1–3 and fails only here, and shipping it would mean the deployments most likely to need the warning are exactly the ones that never see it.
+
+---
+
+#### TC-OAS-004: A scanned write operation is on the public card, and an approval rule removes it
+
+| Field | Value |
+|-------|-------|
+| **ID** | TC-OAS-004 |
+| **Priority** | P0 |
+| **SRS Trace** | FR-OAS-005 (criterion 7), FR-AGC-003 (criterion 11), FR-AGC-004 |
+
+**Test Steps:**
+1. Build from a document with one `POST`; fetch the public card; assert the skill **is** present.
+2. Fetch the extended card as an authenticated caller; assert it is present there too.
+3. Repeat with an ACL rule `{callers: ["*"], targets: [<id>], effect: allow, approval: required}`; assert the skill is **absent** from the public card and **present** on the extended card.
+
+**Expected Result:** advertised anonymously by default; withheld from the public card once an approval requirement exists.
+
+**Why this case exists:** step 1 pins the exposure **as a fact** rather than leaving it implicit in a warning's wording, so a later change to card visibility cannot alter it silently. Step 3 is why the binding does not withhold scanned write operations as a class: one ACL rule closes the discovery exposure and the invocation gap together, and it is the operator's decision to make. Withholding them unconditionally — the `system.*` treatment — would re-create the silent-loss failure FR-OAS-003 exists to close, on modules that are the operator's own API rather than apcore's reserved namespace.
+
+---
+
+#### TC-OAS-005: `spec` resolution obeys the three path-typed rules
+
+| Field | Value |
+|-------|-------|
+| **ID** | TC-OAS-005 |
+| **Priority** | P1 |
+| **SRS Trace** | FR-OAS-004 |
+
+**Preconditions:** A `project_root` that differs from the process CWD. The difference is the whole point — with them equal, every candidate rule agrees and the case asserts nothing.
+
+**Test Steps:**
+1. `https://…` → assert used verbatim, neither path-resolved nor made absolute.
+2. `./openapi.json` → assert resolved against `project_root`, **not** CWD.
+3. `""` → assert discarded with a WARNING and that resolution falls through to the next tier.
+4. `/etc/apcore/openapi.json` → assert passed through unchanged.
+5. Repeat step 2 through the **Config Bus** entry point, not only the helper.
+
+**Expected Result:** URL verbatim; relative against the project root; empty discarded; absolute untouched.
+
+**Why this case exists:** apcore 0.30.0's path-typed protections do not reach a consumer namespace — verified, `Config.path_typed_keys()` is a fixed tuple of apcore's own keys and does not change when a namespace carrying a path-valued default is registered — so this binding owns the rules and nothing upstream will catch a regression. Step 5 exists because the defect actually observed in a sibling binding is not in the resolver but in the *wiring*: its config route never supplies the project root, so the correct helper resolves against the CWD on the one route most deployments use, and a test that calls the helper directly with an explicit base cannot see it.
+
+---
+
+#### TC-OAS-006: A derived ID colliding with a project module fails atomically
+
+| Field | Value |
+|-------|-------|
+| **ID** | TC-OAS-006 |
+| **Priority** | P1 |
+| **SRS Trace** | FR-OAS-006 |
+
+**Preconditions:** A registry pre-populated with **two** module ids that the document will also derive.
+
+**Test Steps:**
+1. Assert the build raises, and that the message names **both** colliding ids.
+2. Assert the registry afterwards is byte-for-byte what it was before.
+3. Assert a mixed deployment without `prefix` is refused **before** any fetch or scan.
+
+**Expected Result:** a refusal naming every collision, and an untouched registry.
+
+**Why this case exists:** two collisions rather than one, because an implementation that reports only the first forces one restart per collision. apcore-toolkit's writers report per-module results and never abort by contract, so without a preflight a duplicate arrives as a failed write result, is logged and skipped, and leaves a partial registry — a skill the document advertises, absent from the card, with a single log line as the only notice. Step 3 keeps a misconfiguration from costing a network round trip.
+
+---
+
 ## 9. Integration Tests
 
 ---
@@ -2867,6 +3024,12 @@ TASKS_CANCEL_REQUEST = lambda task_id: {
 | FR-EXP-001 | Explorer UI | TC-EXP-001–003 |
 | FR-OPS-001 | Health endpoint | TC-OPS-001 |
 | FR-OPS-002 | Metrics endpoint | TC-OPS-002 |
+| FR-OAS-001 | OpenAPI document as a backend source | TC-OAS-001–006 |
+| FR-OAS-002 | Module ID projection | TC-OAS-001 |
+| FR-OAS-003 | Empty-description repair | TC-OAS-002 |
+| FR-OAS-004 | Path-typed `spec` key | TC-OAS-005 |
+| FR-OAS-005 | Unapproved-write warning | TC-OAS-003, TC-OAS-004 |
+| FR-OAS-006 | Collision preflight | TC-OAS-006 |
 
 ### 14.2 Non-Functional Requirements → Test Cases
 

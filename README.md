@@ -37,6 +37,7 @@ By reading the existing apcore metadata—including `input_schema`, `output_sche
 - **🔄 Task Lifecycle**: Full implementation of the A2A task state machine (submitted, working, completed, failed, canceled, input-required).
 - **📡 Streaming & SSE**: Native support for `message/stream` with real-time status and artifact updates, plus cooperative cancellation (`tasks/cancel`).
 - **🔗 A2A Client**: A built-in `A2AClient` to discover and invoke other A2A agents.
+- **📘 OpenAPI Backend**: Point the adapter at an OpenAPI 3.0/3.1 document and every operation becomes an A2A Skill, proxied over HTTP — no apcore project required on the other end.
 - **🛡️ Enterprise Ready**: JWT/Bearer authentication bridged directly to apcore's ACL (Identity) system; configurable CORS.
 - **🔔 Push Notifications**: Webhook-based task state updates with retry.
 - **🔍 Explorer UI**: Built-in browser UI for discovering and testing skills.
@@ -51,19 +52,19 @@ By reading the existing apcore metadata—including `input_schema`, `output_sche
     ```bash
     pip install apcore-a2a
     ```
-    *Requires Python 3.11+ and apcore 0.28.0+.*
+    *Requires Python 3.11+ and apcore 0.30.0+.*
 
 === "TypeScript"
     ```bash
     npm install apcore-a2a
     ```
-    *Requires Node.js 18+ and apcore-js 0.28.0+.*
+    *Requires Node.js 18+ and apcore-js 0.30.0+.*
 
 === "Rust"
     ```bash
     cargo add apcore-a2a
     ```
-    *Requires Rust 1.75+ and apcore 0.28+.*
+    *Requires Rust 1.75+ and apcore 0.30+.*
 
 ---
 
@@ -208,6 +209,7 @@ apcore-a2a acts as a thin, protocol-specific layer on top of apcore (Python, Typ
 - **[Full Documentation Site](https://aiperceivable.github.io/apcore-a2a/)**
 - **[Getting Started Guide](docs/getting-started.md)** — Install, serve, and call agents
 - [Feature Specs Overview](docs/features/overview.md) — All feature specifications
+- [OpenAPI Backend](docs/features/openapi-backend.md) — Serve an OpenAPI document as A2A Skills
 - [Specifications (PRD, TDD, SRS)](docs/spec/)
 
 ---

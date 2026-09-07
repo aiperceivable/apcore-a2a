@@ -1765,6 +1765,144 @@ Code -32040 is a JSON-RPC implementation-defined server error (the §13.2 "JSON-
 
 ---
 
+### 3.16 FR-OAS: OpenAPI Backend Requirements
+
+Feature [F-12](../features/openapi-backend.md). A fourth backend source: an OpenAPI 3.0/3.1
+document becomes A2A Skills, proxied over HTTP to the API that published it, with no apcore project
+on the other end.
+
+---
+
+#### FR-OAS-001: OpenAPI document as a backend source
+
+| Field | Value |
+|-------|-------|
+| **ID** | FR-OAS-001 |
+| **Priority** | P1 |
+| **PRD Trace** | FR-020 |
+
+**Description:** The system SHALL accept an OpenAPI 3.0/3.1 document as a backend source and produce a populated apcore `Registry` from it.
+
+**Rationale:** The scanner and the HTTP proxy writer already ship in apcore-toolkit 0.11.0; what was missing is the link that composes them into a `Registry` the existing adapter can serve. apcore-cli and apcore-mcp already consume the same scanner, making apcore-a2a the last binding in the ecosystem without it.
+
+**Acceptance Criteria:**
+1. The backend SHALL compose `load_spec` -> `OpenAPIScanner.scan` -> `HTTPProxyRegistryWriter.write` and SHALL NOT reimplement scanning, schema conversion, or execution.
+2. The backend SHALL return a `Registry`, not an `Executor`, so that `register_sys_modules` remains available exactly as for an extensions directory.
+3. The backend SHALL accept an OpenAPI source combined with an extensions directory only when `prefix` is set; that check SHALL run before any fetch or scan.
+4. Supplying both a caller-provided `Registry`/`Executor` and an OpenAPI source SHALL be refused.
+5. A document that is not OpenAPI 3.0.x / 3.1.x SHALL be refused, with the refusal propagated from the scanner.
+
+---
+
+#### FR-OAS-002: Module ID projection into apcore's registry alphabet
+
+| Field | Value |
+|-------|-------|
+| **ID** | FR-OAS-002 |
+| **Priority** | P0 |
+| **PRD Trace** | FR-020 |
+
+**Description:** The system SHALL project every derived `module_id` into apcore's registry alphabet before registration, and SHALL report every operation it cannot project.
+
+**Rationale:** apcore-toolkit sanitizes a derived ID into `[A-Za-z0-9_.-]`; apcore's `Registry` accepts only `^[a-z][a-z0-9_]*(\.[a-z][a-z0-9_]*)*$`. Measured against apcore 0.30.0 / apcore-toolkit 0.11.1, only two of nine realistic operation shapes register unrepaired, and the canonical Swagger Petstore is entirely in the rejected set — it scans cleanly, registers nothing, and the server serves an Agent Card with zero skills without raising anywhere.
+
+**Acceptance Criteria:**
+1. The projection SHALL lowercase the derived ID and replace `-` with `_`.
+2. If every dot-separated segment then matches `^[a-z][a-z0-9_]*$`, the projected ID SHALL be used; otherwise the module SHALL be dropped.
+3. A dropped module SHALL be reported at WARNING naming both the derived ID and the offending segment. This report SHALL NOT be delegated to the scanner, whose `transform_module` hook drops a module silently when it returns nothing.
+4. A caller-supplied `transform_module` hook SHALL run before the projection, so that "every registered module ID is apcore-legal" holds unconditionally.
+5. The projection SHALL run before the scanner's own deduplication, because lowercasing can create a collision the document did not have (`listPets` and `listpets`).
+6. One unprojectable operation SHALL NOT fail the scan; sibling operations SHALL still register.
+
+---
+
+#### FR-OAS-003: Empty-description repair
+
+| Field | Value |
+|-------|-------|
+| **ID** | FR-OAS-003 |
+| **Priority** | P0 |
+| **PRD Trace** | FR-020, FR-003 |
+
+**Description:** The system SHALL synthesize a description for any scanned operation whose description is empty or whitespace-only, before the module reaches the Agent Card builder.
+
+**Rationale:** The scanner derives `description = summary or first_line(description) or ""`, and FR-AGC-002 requires the Agent Card builder to skip a module whose description is empty. Composed naively those two correct behaviours drop every undocumented operation from the card with no diagnostic — a document with 80 operations, 30 undocumented, yields 50 skills and no indication that 30 were lost. This is specific to the A2A binding; apcore-cli and apcore-mcp have no equivalent filter.
+
+**Acceptance Criteria:**
+1. The synthesized description SHALL be `{METHOD} {url_path}` taken from the `http_method` / `url_path` metadata keys the writer already requires.
+2. The repair SHALL NOT fire when the scanner produced a non-empty description.
+3. A whitespace-only description SHALL be treated exactly as an absent one.
+4. The system SHALL report at INFO the count and the affected module IDs.
+5. The reported IDs SHALL be the post-projection IDs — the ones that reach the Agent Card. Reporting a pre-projection ID directs the operator to a skill that does not exist.
+6. The repair SHALL run after any caller-supplied `transform_module` hook and before the FR-OAS-002 projection.
+
+---
+
+#### FR-OAS-004: The spec location is a path-typed key
+
+| Field | Value |
+|-------|-------|
+| **ID** | FR-OAS-004 |
+| **Priority** | P1 |
+| **PRD Trace** | FR-020 |
+
+**Description:** The system SHALL own the resolution rules for `apcore-a2a.openapi.spec`, which is the first path-typed key in the `apcore-a2a` namespace.
+
+**Rationale:** apcore 0.30.0 declared the closed set of path-typed configuration keys (PROTOCOL_SPEC §9.2.1) and the base a relative one resolves against (§9.2.2), but both apply to apcore's own key surface. Verified against apcore 0.30.0: `Config.path_typed_keys()` returns a fixed tuple of apcore's own five keys and does not change after a namespace carrying a path-valued default is registered, and the §9.2.1 requirement-5 empty-value discard is gated on that same fixed set.
+
+**Acceptance Criteria:**
+1. A value beginning `http://` or `https://` SHALL be treated as a URL and used verbatim — never path-resolved and never made absolute. The discriminator SHALL be the scheme prefix, not an inference from the string's shape.
+2. A set-but-empty value SHALL be discarded with a WARNING and resolution SHALL fall through to the next configuration tier. It SHALL NOT be joined to a base, which would silently yield the project root.
+3. A relative path SHALL resolve against `Config.project_root`, not the process CWD and not the document's own directory.
+4. An absolute path SHALL pass through unchanged.
+5. The Config Bus route SHALL resolve the project root itself rather than leaving it unset, since that is the route most deployments use.
+
+---
+
+#### FR-OAS-005: Unapproved-write warning
+
+| Field | Value |
+|-------|-------|
+| **ID** | FR-OAS-005 |
+| **Priority** | P0 |
+| **PRD Trace** | FR-020, NFR-002 |
+
+**Description:** The system SHALL warn at startup when it registers a scanned operation whose HTTP method changes state and for which no approval path is demonstrable.
+
+**Rationale:** The toolkit never infers `requires_approval` for any method — a `POST /charges` that moves money is annotated exactly like a `POST /echo`. Under FR-AGC-003 the public Agent Card subtracts only ACL-denied and approval-gated skills, so such an operation is advertised on `/.well-known/agent-card.json`, a route that is auth-exempt by design and that A2A clients are built to crawl. The equivalent exposure in apcore-mcp is a tool list behind a session; here it is a public discovery document.
+
+**Acceptance Criteria:**
+1. The warning SHALL fire when any registered module's method is in `{POST, PUT, PATCH, DELETE}` and its `requires_approval` is false.
+2. The message SHALL name the public Agent Card and its path, and SHALL list the affected module IDs.
+3. The warning SHALL be suppressed only by: no such module in the scanned set; every such module declaring `requires_approval` itself; or `apcore-a2a.openapi.acknowledge_unapproved_writes: true`.
+4. The warning SHALL NOT be suppressed by the presence of an attached ACL. A permissive ACL, an ACL whose targets never match, or an ACL carrying no `approval: required` each leaves every write operation ungated while satisfying "an ACL is attached".
+5. The wording SHALL be escalated when the approval gate is absent from the execution pipeline under the active strategy (`governance_state().builtin_approval_gate_wired` is false).
+6. The base wording SHALL speak only to the **module-level** declaration. The backend builds the Registry from which the Executor is later constructed, so no ACL exists at the point this warning fires; what the deployment enforces is FR-AGC-007's serve-time question, not this one. `GovernanceState` accordingly carries no field reporting whether any rule requires approval, and this requirement SHALL NOT be specified in terms of one.
+7. Scanned write operations SHALL NOT be withheld from the public card as a class. Unlike the `system.*` namespace (FR-AGC-003 criterion 12), these are the operator's own modules, and withholding them would reproduce the silent-loss failure FR-OAS-003 exists to close.
+
+---
+
+#### FR-OAS-006: Collision preflight
+
+| Field | Value |
+|-------|-------|
+| **ID** | FR-OAS-006 |
+| **Priority** | P1 |
+| **PRD Trace** | FR-020 |
+
+**Description:** The system SHALL refuse to start when a derived module ID collides with a module already in the target registry, and SHALL leave that registry unchanged.
+
+**Rationale:** apcore-toolkit writers report per-module results and never abort by contract. Without a preflight a duplicate arrives as a failed write result, is logged and skipped, and leaves a partial registry — a skill the document advertises, absent from the card, with one log line as the only notice.
+
+**Acceptance Criteria:**
+1. The preflight SHALL run before the first write.
+2. The refusal SHALL name every colliding ID, sorted and deduplicated. Reporting only the first forces one restart per collision.
+3. The target registry SHALL be byte-for-byte unchanged after the refusal.
+4. Two operations within one document deriving the same ID SHALL NOT reach the preflight; the scanner renames the second and attaches a warning.
+5. A single module's write failure SHALL be reported at ERROR and SHALL NOT prevent the remaining modules from registering.
+
+---
+
 ## 4. Specific Requirements -- Non-Functional Requirements
 
 ### 4.1 NFR-PERF: Performance Requirements
@@ -3038,6 +3176,7 @@ The system consumes A2A types, JSON-RPC handling, and SSE utilities from the `a2
 | FR-017 | Agent Explorer UI | P2 | FR-EXP-001 |
 | FR-018 | Health/Metrics Endpoints | P2 | FR-OPS-001, FR-OPS-002 |
 | FR-019 | Dynamic Skill Registration | P2 | FR-AGC-005, FR-OPS-003 |
+| FR-020 | OpenAPI Backend | P1 | FR-OAS-001, FR-OAS-002, FR-OAS-003, FR-OAS-004, FR-OAS-005, FR-OAS-006 |
 
 ### 9.2 SRS Requirement to PRD Feature Reverse Mapping
 
@@ -3112,6 +3251,12 @@ The system consumes A2A types, JSON-RPC handling, and SSE utilities from the `a2
 | FR-OPS-001 | FR-018 | P2 |
 | FR-OPS-002 | FR-018 | P2 |
 | FR-OPS-003 | FR-019 | P2 |
+| FR-OAS-001 | FR-020 | P1 |
+| FR-OAS-002 | FR-020 | P0 |
+| FR-OAS-003 | FR-020 | P0 |
+| FR-OAS-004 | FR-020 | P1 |
+| FR-OAS-005 | FR-020 | P0 |
+| FR-OAS-006 | FR-020 | P1 |
 
 ### 9.3 NFR Traceability
 

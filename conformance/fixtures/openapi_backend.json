@@ -1,0 +1,522 @@
+{
+  "description": "OpenAPI Backend parity (Algorithm A-OAS, feature F-12). The runner builds a Registry from each `document` via the backend entry point (load_spec -> OpenAPIScanner.scan -> projection -> HTTPProxyRegistryWriter.write) and asserts the registered module set, the repaired descriptions, the emitted diagnostics, and the resulting Agent Card. The scanner's own derivation is NOT restated here -- it is pinned by apcore-toolkit's own 24-case corpus. What this fixture owns is everything the binding adds on top: the apcore-registry ID projection (FR-OAS-002), the empty-description repair (FR-OAS-003), the path-typed spec key (FR-OAS-004), the unapproved-write warning (FR-OAS-005), and the collision preflight (FR-OAS-006). Every expectation was MEASURED against apcore-toolkit 0.11.1 / apcore 0.30.0 by running the real scanner, never derived from reading the algorithm.",
+  "contract_version": "1.0",
+  "sub_algorithm": "A-OAS",
+  "spec_ref": "docs/features/openapi-backend.md",
+
+  "notes": [
+    "Every case spells out its full `document` rather than referencing a shared base, so a driver never has to merge fragments.",
+    "`expected_modules[].description` is the description AFTER the FR-OAS-003 repair. A case whose operation carries a summary asserts the repair did NOT fire.",
+    "Annotations are asserted against apcore's own ModuleAnnotations field names (readonly/destructive/idempotent/open_world/requires_approval), never against a transport-specific projection. apcore-mcp's fixture asserts MCP ToolAnnotations hint names; that column has no A2A counterpart and is deliberately absent.",
+    "`requires_approval` is asserted false on every write-method case. It is pinned as a FACT so the gap cannot be closed accidentally in one language: the scanner never infers it, for any method.",
+    "The path-derived id for `/users/{userId}` measures as `users.userid.get` on apcore-toolkit 0.11.1 -- the brace parameter contributes its name lowercased, with no underscore inserted. Do not 'correct' this to `users.user_id.get`.",
+    "Not pinned here: the scanner's module_id derivation, `metadata.openapi.*` contents, proxy request shaping, and upstream HTTP error wording. All belong to apcore-toolkit or to the deployment.",
+    "DRIVER REQUIREMENT: a runner MUST fail loudly when a case group named here is absent or empty, and MUST NOT fall back to an empty list. Measured 2026-09-07 by renaming `test_cases`: apcore-a2a-python failed at collection (it indexes the key), while the TypeScript runner silently dropped from 46 passing tests to 33 and the Rust runner reported 9 passing while asserting nothing. Both used an `?? []` / `unwrap_or_default()` fallback. A group rename in this file must never be able to turn a runner green. Skipping the whole suite when the spec repo is absent is a separate, legitimate case."
+  ],
+
+  "test_cases": [
+    {
+      "id": "projection_camel_case_operation_id",
+      "description": "FR-OAS-002. The toolkit sanitizes to [A-Za-z0-9_.-]; apcore's registry accepts only ^[a-z][a-z0-9_]*(\\.[a-z][a-z0-9_]*)*$. Without the projection this module does not register and the Agent Card is empty.",
+      "document": {
+        "openapi": "3.0.3",
+        "info": { "title": "Pets", "version": "1.0.0" },
+        "servers": [{ "url": "https://api.example.com" }],
+        "paths": {
+          "/pets": {
+            "get": {
+              "operationId": "listPets",
+              "summary": "List all pets",
+              "responses": { "200": { "description": "ok" } }
+            }
+          }
+        }
+      },
+      "options": {},
+      "expected_modules": [
+        {
+          "module_id": "listpets",
+          "description": "List all pets",
+          "annotations": { "readonly": true, "destructive": false, "idempotent": false, "open_world": true, "requires_approval": false }
+        }
+      ],
+      "expected_dropped": []
+    },
+
+    {
+      "id": "projection_hyphen_to_underscore",
+      "description": "FR-OAS-002 rule 2. A hyphen is legal to the toolkit and illegal to apcore; the dots are segment separators and survive.",
+      "document": {
+        "openapi": "3.0.3",
+        "info": { "title": "Items", "version": "1.0.0" },
+        "servers": [{ "url": "https://api.example.com" }],
+        "paths": {
+          "/items": {
+            "get": {
+              "operationId": "pet-store.items.get",
+              "summary": "List items",
+              "responses": { "200": { "description": "ok" } }
+            }
+          }
+        }
+      },
+      "options": {},
+      "expected_modules": [
+        {
+          "module_id": "pet_store.items.get",
+          "description": "List items",
+          "annotations": { "readonly": true, "destructive": false, "idempotent": false, "open_world": true, "requires_approval": false }
+        }
+      ],
+      "expected_dropped": []
+    },
+
+    {
+      "id": "projection_unprojectable_segment_dropped_with_warning",
+      "description": "DISCRIMINATING CASE for FR-OAS-002. An apcore segment may not begin with a digit, so `2fa` cannot be repaired without inventing an ID. The module is dropped -- and because the projection runs inside the scanner's transform_module hook, a hook returning None drops it SILENTLY. An implementation that merely drops the module passes every other assertion in this group and fails this one. The sibling operation must still register: one bad operation does not fail the scan.",
+      "document": {
+        "openapi": "3.0.3",
+        "info": { "title": "Mixed", "version": "1.0.0" },
+        "servers": [{ "url": "https://api.example.com" }],
+        "paths": {
+          "/v1/2fa": {
+            "get": {
+              "summary": "Two factor status",
+              "responses": { "200": { "description": "ok" } }
+            }
+          },
+          "/pets": {
+            "get": {
+              "operationId": "listPets",
+              "summary": "List pets",
+              "responses": { "200": { "description": "ok" } }
+            }
+          }
+        }
+      },
+      "options": {},
+      "expected_modules": [
+        {
+          "module_id": "listpets",
+          "description": "List pets",
+          "annotations": { "readonly": true, "destructive": false, "idempotent": false, "open_world": true, "requires_approval": false }
+        }
+      ],
+      "expected_dropped": [
+        { "derived_id": "v1.2fa.get", "offending_segment": "2fa" }
+      ],
+      "expected_warning_substrings": ["v1.2fa.get", "2fa"]
+    },
+
+    {
+      "id": "projection_runs_before_deduplication",
+      "description": "FR-OAS-002 ordering. `listPets` and `listpets` are two distinct operations to OpenAPI and one module ID to apcore -- the projection CREATES a collision the document did not have. Projecting after the scanner's deduplicate_ids would register one and lose the other with no warning. Measured: the scanner renames the second and attaches the warning itself.",
+      "document": {
+        "openapi": "3.0.3",
+        "info": { "title": "Collide", "version": "1.0.0" },
+        "servers": [{ "url": "https://api.example.com" }],
+        "paths": {
+          "/a": {
+            "get": {
+              "operationId": "listPets",
+              "summary": "Camel variant",
+              "responses": { "200": { "description": "ok" } }
+            }
+          },
+          "/b": {
+            "get": {
+              "operationId": "listpets",
+              "summary": "Lower variant",
+              "responses": { "200": { "description": "ok" } }
+            }
+          }
+        }
+      },
+      "options": {},
+      "expected_modules": [
+        {
+          "module_id": "listpets",
+          "description": "Camel variant",
+          "annotations": { "readonly": true, "destructive": false, "idempotent": false, "open_world": true, "requires_approval": false }
+        },
+        {
+          "module_id": "listpets_2",
+          "description": "Lower variant",
+          "annotations": { "readonly": true, "destructive": false, "idempotent": false, "open_world": true, "requires_approval": false },
+          "warnings_contain": "renamed"
+        }
+      ],
+      "expected_dropped": []
+    },
+
+    {
+      "id": "projection_prefix_applied_before_projection",
+      "description": "FR-OAS-002 with `prefix`. The prefix is the scanner's base_path_prefix and is already part of the derived ID when the projection sees it.",
+      "document": {
+        "openapi": "3.0.3",
+        "info": { "title": "Pets", "version": "1.0.0" },
+        "servers": [{ "url": "https://api.example.com" }],
+        "paths": {
+          "/pets": {
+            "get": {
+              "operationId": "listPets",
+              "summary": "List pets",
+              "responses": { "200": { "description": "ok" } }
+            }
+          }
+        }
+      },
+      "options": { "prefix": "petstore" },
+      "expected_modules": [
+        {
+          "module_id": "petstore.listpets",
+          "description": "List pets",
+          "annotations": { "readonly": true, "destructive": false, "idempotent": false, "open_world": true, "requires_approval": false }
+        }
+      ],
+      "expected_dropped": []
+    },
+
+    {
+      "id": "description_synthesized_when_absent",
+      "description": "DISCRIMINATING CASE for FR-OAS-003, and A2A-specific. The operation carries neither summary nor description, so the scanner yields `\"\"` -- and AgentCardBuilder skips any module whose description is empty. Composed naively those two correct behaviours drop the operation from the Agent Card with no diagnostic. The repair synthesizes `{METHOD} {url_path}` from the metadata keys the writer already requires.",
+      "document": {
+        "openapi": "3.0.3",
+        "info": { "title": "Pets", "version": "1.0.0" },
+        "servers": [{ "url": "https://api.example.com" }],
+        "paths": {
+          "/pets/{petId}": {
+            "delete": {
+              "operationId": "deletePet",
+              "responses": { "200": { "description": "ok" } }
+            }
+          }
+        }
+      },
+      "options": { "acknowledge_unapproved_writes": true },
+      "expected_modules": [
+        {
+          "module_id": "deletepet",
+          "description": "DELETE /pets/{petId}",
+          "description_was_synthesized": true,
+          "annotations": { "readonly": false, "destructive": true, "idempotent": false, "open_world": true, "requires_approval": false }
+        }
+      ],
+      "expected_dropped": [],
+      "expected_on_agent_card": ["deletepet"]
+    },
+
+    {
+      "id": "description_synthesized_when_whitespace_only",
+      "description": "FR-OAS-003. A whitespace-only summary reaches the module verbatim and is exactly as unusable as an absent one -- AgentCardBuilder trims before testing, so it skips this too.",
+      "document": {
+        "openapi": "3.0.3",
+        "info": { "title": "Pets", "version": "1.0.0" },
+        "servers": [{ "url": "https://api.example.com" }],
+        "paths": {
+          "/pets": {
+            "get": {
+              "operationId": "listPets",
+              "summary": "   ",
+              "responses": { "200": { "description": "ok" } }
+            }
+          }
+        }
+      },
+      "options": {},
+      "expected_modules": [
+        {
+          "module_id": "listpets",
+          "description": "GET /pets",
+          "description_was_synthesized": true,
+          "annotations": { "readonly": true, "destructive": false, "idempotent": false, "open_world": true, "requires_approval": false }
+        }
+      ],
+      "expected_dropped": [],
+      "expected_on_agent_card": ["listpets"]
+    },
+
+    {
+      "id": "description_preserved_when_present",
+      "description": "FR-OAS-003 negative case. The repair must not fire when the scanner produced a usable description. Measured: with no summary, the scanner takes the FIRST LINE of `description`.",
+      "document": {
+        "openapi": "3.0.3",
+        "info": { "title": "Pets", "version": "1.0.0" },
+        "servers": [{ "url": "https://api.example.com" }],
+        "paths": {
+          "/pets": {
+            "get": {
+              "operationId": "listPets",
+              "description": "First line here.\nSecond line ignored.",
+              "responses": { "200": { "description": "ok" } }
+            }
+          }
+        }
+      },
+      "options": {},
+      "expected_modules": [
+        {
+          "module_id": "listpets",
+          "description": "First line here.",
+          "description_was_synthesized": false,
+          "annotations": { "readonly": true, "destructive": false, "idempotent": false, "open_world": true, "requires_approval": false }
+        }
+      ],
+      "expected_dropped": []
+    },
+
+    {
+      "id": "base_url_option_supplies_what_the_document_lacks",
+      "description": "The positive counterpart to `no_base_url_anywhere_rejected`, and the only case that can detect an implementation silently ignoring `base_url`. The document has NO `servers`, so the option is the sole source; an implementation that drops the key fails here with the same 'no base_url' error the negative case asserts. Every other case in this corpus supplies `servers[0].url`, which masks the defect.",
+      "document": {
+        "openapi": "3.0.3",
+        "info": { "title": "NoServer", "version": "1.0.0" },
+        "paths": {
+          "/pets": {
+            "get": {
+              "operationId": "listPets",
+              "summary": "List pets",
+              "responses": { "200": { "description": "ok" } }
+            }
+          }
+        }
+      },
+      "options": { "base_url": "https://api.example.com" },
+      "expected_modules": [
+        {
+          "module_id": "listpets",
+          "description": "List pets",
+          "annotations": { "readonly": true, "destructive": false, "idempotent": false, "open_world": true, "requires_approval": false }
+        }
+      ],
+      "expected_dropped": []
+    },
+
+    {
+      "id": "annotations_inferred_from_http_method",
+      "description": "The full method-to-annotation table, measured. GET is readonly+cacheable; PUT is idempotent; DELETE is destructive; POST and PATCH carry NO behavioural annotation at all. open_world is true throughout -- these modules do call an external system. requires_approval is false for EVERY method including DELETE: the scanner never infers it, which is the gap FR-OAS-005 warns about.",
+      "document": {
+        "openapi": "3.0.3",
+        "info": { "title": "Methods", "version": "1.0.0" },
+        "servers": [{ "url": "https://api.example.com" }],
+        "paths": {
+          "/r": { "get": { "operationId": "readOp", "summary": "read", "responses": { "200": { "description": "ok" } } } },
+          "/w": { "post": { "operationId": "writeOp", "summary": "write", "responses": { "200": { "description": "ok" } } } },
+          "/p": { "put": { "operationId": "putOp", "summary": "put", "responses": { "200": { "description": "ok" } } } },
+          "/d": { "delete": { "operationId": "delOp", "summary": "delete", "responses": { "200": { "description": "ok" } } } },
+          "/pa": { "patch": { "operationId": "patchOp", "summary": "patch", "responses": { "200": { "description": "ok" } } } }
+        }
+      },
+      "options": { "acknowledge_unapproved_writes": true },
+      "expected_modules": [
+        { "module_id": "readop", "description": "read", "annotations": { "readonly": true, "destructive": false, "idempotent": false, "open_world": true, "requires_approval": false } },
+        { "module_id": "writeop", "description": "write", "annotations": { "readonly": false, "destructive": false, "idempotent": false, "open_world": true, "requires_approval": false } },
+        { "module_id": "putop", "description": "put", "annotations": { "readonly": false, "destructive": false, "idempotent": true, "open_world": true, "requires_approval": false } },
+        { "module_id": "delop", "description": "delete", "annotations": { "readonly": false, "destructive": true, "idempotent": false, "open_world": true, "requires_approval": false } },
+        { "module_id": "patchop", "description": "patch", "annotations": { "readonly": false, "destructive": false, "idempotent": false, "open_world": true, "requires_approval": false } }
+      ],
+      "expected_dropped": []
+    }
+  ],
+
+  "warning_cases": [
+    {
+      "id": "write_warning_fires_for_each_write_method",
+      "description": "FR-OAS-005. Any of POST/PUT/PATCH/DELETE with requires_approval false and no acknowledgement produces the warning. The message must name the public Agent Card, because that is the A2A-specific exposure: the route is auth-exempt and A2A clients are built to crawl it.",
+      "document": {
+        "openapi": "3.0.3",
+        "info": { "title": "Writes", "version": "1.0.0" },
+        "servers": [{ "url": "https://api.example.com" }],
+        "paths": {
+          "/charges": { "post": { "operationId": "createCharge", "summary": "Create a charge", "responses": { "200": { "description": "ok" } } } }
+        }
+      },
+      "options": {},
+      "acl": null,
+      "expect_warning": true,
+      "expected_warning_substrings": ["1", "POST", "public", "agent-card"]
+    },
+    {
+      "id": "write_warning_silent_for_readonly_document",
+      "description": "FR-OAS-005 suppression 1: nothing to warn about. A document of GETs only.",
+      "document": {
+        "openapi": "3.0.3",
+        "info": { "title": "Reads", "version": "1.0.0" },
+        "servers": [{ "url": "https://api.example.com" }],
+        "paths": {
+          "/pets": { "get": { "operationId": "listPets", "summary": "List pets", "responses": { "200": { "description": "ok" } } } }
+        }
+      },
+      "options": {},
+      "acl": null,
+      "expect_warning": false
+    },
+    {
+      "id": "write_warning_silent_under_acknowledgement",
+      "description": "FR-OAS-005 suppression 3: an explicit recorded operator decision. The ONLY configuration flag that suppresses it.",
+      "document": {
+        "openapi": "3.0.3",
+        "info": { "title": "Writes", "version": "1.0.0" },
+        "servers": [{ "url": "https://api.example.com" }],
+        "paths": {
+          "/charges": { "post": { "operationId": "createCharge", "summary": "Create a charge", "responses": { "200": { "description": "ok" } } } }
+        }
+      },
+      "options": { "acknowledge_unapproved_writes": true },
+      "acl": null,
+      "expect_warning": false
+    },
+    {
+      "id": "write_warning_not_suppressed_by_permissive_acl",
+      "description": "DISCRIMINATING CASE for FR-OAS-005. An ACL is attached and it permits everything -- so nothing will ever ask for approval, and the warning must still fire. apcore's own GovernanceState.unprotected_control_surface states the rule this follows: it reports the ABSENCE OF A GATE, never the presence of protection; a wired ACL that permits every call still yields false. An implementation that gates the warning on governance_state().acl_configured passes every other case in this group and fails this one.",
+      "document": {
+        "openapi": "3.0.3",
+        "info": { "title": "Writes", "version": "1.0.0" },
+        "servers": [{ "url": "https://api.example.com" }],
+        "paths": {
+          "/charges": { "post": { "operationId": "createCharge", "summary": "Create a charge", "responses": { "200": { "description": "ok" } } } }
+        }
+      },
+      "options": {},
+      "acl": {
+        "default_effect": "allow",
+        "rules": [
+          { "callers": ["*"], "targets": ["*"], "effect": "allow" }
+        ]
+      },
+      "expect_warning": true,
+      "expected_warning_substrings": ["POST", "public"]
+    }
+  ],
+
+  "config_cases": [
+    {
+      "id": "spec_url_used_verbatim",
+      "description": "FR-OAS-004 rule 1. A value beginning http:// or https:// is a URL: never path-resolved, never made absolute, despite a project_root and a differing cwd both being set. The discriminator is the scheme prefix, not a guess from the string's shape.",
+      "spec_value": "https://api.example.com/openapi.json",
+      "project_root": "/srv/project",
+      "cwd": "/tmp/elsewhere",
+      "expected_resolved_spec": "https://api.example.com/openapi.json"
+    },
+    {
+      "id": "relative_spec_resolves_against_project_root",
+      "description": "FR-OAS-004 rule 3. Against Config.project_root, NOT the process CWD. The differing cwd is what makes this case assert anything -- apcore-mcp's TypeScript and Rust config routes silently resolve against CWD here, which this fixture exists to prevent in this binding.",
+      "spec_value": "./openapi.json",
+      "project_root": "/srv/project",
+      "cwd": "/tmp/elsewhere",
+      "expected_resolved_spec": "/srv/project/openapi.json"
+    },
+    {
+      "id": "empty_spec_value_discarded_with_fallthrough",
+      "description": "FR-OAS-004 rule 2. A set-but-empty value (from APCORE_A2A_OPENAPI_SPEC= or spec: \"\") is discarded with a WARNING and resolution falls through to the next tier. It must NOT be joined to a base, which would silently yield the project root -- exactly the failure apcore closed for APCORE_ACL_ROOT= and whose fix does not reach a consumer namespace.",
+      "spec_value": "",
+      "spec_value_next_tier": "./openapi.json",
+      "project_root": "/srv/project",
+      "cwd": "/tmp/elsewhere",
+      "expected_resolved_spec": "/srv/project/openapi.json",
+      "expected_warning_substring": "empty"
+    },
+    {
+      "id": "absolute_spec_passes_through",
+      "description": "FR-OAS-004 rule 3, absolute branch. An absolute path is already resolved and project_root must not be prepended.",
+      "spec_value": "/etc/apcore/openapi.json",
+      "project_root": "/srv/project",
+      "cwd": "/tmp/elsewhere",
+      "expected_resolved_spec": "/etc/apcore/openapi.json"
+    }
+  ],
+
+  "card_cases": [
+    {
+      "id": "public_card_advertises_unapproved_write",
+      "description": "The exposure FR-OAS-005 warns about, pinned as a fact rather than left implicit. A scanned write operation is neither ACL-denied to @external nor approval-gated, so the 0.6.0 public-card filter subtracts nothing and it appears on the anonymous, auth-exempt discovery document. This case exists so that a future change to card visibility cannot silently alter the exposure without failing a test.",
+      "document": {
+        "openapi": "3.0.3",
+        "info": { "title": "Writes", "version": "1.0.0" },
+        "servers": [{ "url": "https://api.example.com" }],
+        "paths": {
+          "/charges": { "post": { "operationId": "createCharge", "summary": "Create a charge", "responses": { "200": { "description": "ok" } } } }
+        }
+      },
+      "options": { "acknowledge_unapproved_writes": true },
+      "acl": null,
+      "expected_public_card_skills": ["createcharge"],
+      "expected_extended_card_skills": ["createcharge"]
+    },
+    {
+      "id": "approval_required_acl_withholds_from_public_card_only",
+      "description": "The recommended remedy, and the reason the backend does NOT withhold scanned write operations as a class. An ACL rule carrying approval: required both gates the call and removes the skill from the public card (FR-AGC-003 criterion 11), while the extended card -- served to an authenticated caller -- still advertises it. One configuration change closes the discovery exposure and the invocation gap together.",
+      "document": {
+        "openapi": "3.0.3",
+        "info": { "title": "Writes", "version": "1.0.0" },
+        "servers": [{ "url": "https://api.example.com" }],
+        "paths": {
+          "/charges": { "post": { "operationId": "createCharge", "summary": "Create a charge", "responses": { "200": { "description": "ok" } } } }
+        }
+      },
+      "options": {},
+      "acl": {
+        "default_effect": "allow",
+        "rules": [
+          { "callers": ["*"], "targets": ["createcharge"], "effect": "allow", "approval": "required" }
+        ]
+      },
+      "expected_public_card_skills": [],
+      "expected_extended_card_skills": ["createcharge"]
+    }
+  ],
+
+  "error_cases": [
+    {
+      "id": "swagger_2_rejected",
+      "description": "OpenAPIScanner.scan refuses anything that is not 3.0.x / 3.1.x. Only the fragment '3.0' is pinned, never the toolkit's full sentence -- the wording belongs to apcore-toolkit and may change without breaking this contract.",
+      "document": { "swagger": "2.0", "info": { "title": "Old", "version": "1.0.0" }, "paths": {} },
+      "options": {},
+      "expected_error_substrings": ["3.0"]
+    },
+    {
+      "id": "no_base_url_anywhere_rejected",
+      "description": "No base_url option and no usable absolute servers[0].url. A relative or templated server URL counts as absent.",
+      "document": {
+        "openapi": "3.0.3",
+        "info": { "title": "NoServer", "version": "1.0.0" },
+        "paths": {
+          "/pets": { "get": { "operationId": "listPets", "summary": "List pets", "responses": { "200": { "description": "ok" } } } }
+        }
+      },
+      "options": {},
+      "expected_error_substrings": ["base_url"]
+    },
+    {
+      "id": "missing_prefix_in_mixed_deployment_rejected",
+      "description": "FR-OAS-006. When an extensions directory is also configured, `prefix` is mandatory: the scanner deduplicates within one scan only and knows nothing about modules already in the registry. Checked FIRST, before any fetch or scan, so a misconfiguration fails without a network round trip.",
+      "document": {
+        "openapi": "3.0.3",
+        "info": { "title": "Pets", "version": "1.0.0" },
+        "servers": [{ "url": "https://api.example.com" }],
+        "paths": {
+          "/pets": { "get": { "operationId": "listPets", "summary": "List pets", "responses": { "200": { "description": "ok" } } } }
+        }
+      },
+      "options": { "additional_backend_source": true },
+      "expected_error_substrings": ["prefix"]
+    },
+    {
+      "id": "id_collision_against_registry_rejected_atomically",
+      "description": "FR-OAS-006. TWO collisions are seeded deliberately: both must be named, because an implementation reporting only the first forces one restart per collision. The registry must be byte-for-byte unchanged afterwards -- toolkit writers report per-module WriteResults and never abort, so without a preflight a duplicate arrives as a failed WriteResult, gets logged and skipped, and leaves a partial registry: a skill the document advertises, absent from the card, with one log line as the only notice.",
+      "document": {
+        "openapi": "3.0.3",
+        "info": { "title": "Pets", "version": "1.0.0" },
+        "servers": [{ "url": "https://api.example.com" }],
+        "paths": {
+          "/pets": { "get": { "operationId": "listPets", "summary": "List pets", "responses": { "200": { "description": "ok" } } } },
+          "/store": { "get": { "operationId": "getStore", "summary": "Get store", "responses": { "200": { "description": "ok" } } } }
+        }
+      },
+      "options": {},
+      "preexisting_registry_module_ids": ["listpets", "getstore"],
+      "expected_error_substrings": ["listpets", "getstore"],
+      "expected_registry_module_ids_after": ["getstore", "listpets"]
+    }
+  ]
+}

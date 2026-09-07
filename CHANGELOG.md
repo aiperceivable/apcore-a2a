@@ -5,6 +5,119 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.7.0] - 2026-09-07
+
+Minor release across all three SDKs. Two things ship together: the **OpenAPI Backend**
+(feature F-12), and the runtime floor moving to **apcore 0.30.0 / apcore-toolkit 0.11.1**
+— which is not a coincidence, because the OpenAPI Scanner the feature is built on is
+what apcore-toolkit 0.11.0 added.
+
+### Added
+
+- **F-12 OpenAPI Backend** (`docs/features/openapi-backend.md`, SRS §3.16 `FR-OAS-001`…`006`,
+  PRD `FR-020`, Tech Design §4.10). Point apcore-a2a at an OpenAPI 3.0/3.1 document and
+  every operation becomes an A2A Skill on the Agent Card, proxied over HTTP to the API that
+  published it — with no apcore project on the other end. apcore-cli shipped the same
+  scanner as FE-15a in its 0.12.0 and apcore-mcp as its OpenAPI Backend in 0.20.0; this
+  makes apcore-a2a the third and last consumer in the ecosystem.
+
+  The pipeline is `load_spec → OpenAPIScanner.scan → HTTPProxyRegistryWriter.write →
+  Registry`, all of it already-shipped apcore-toolkit code. Everything downstream — skill
+  mapping, schema conversion, card visibility, ACL, approval, execution — is the code that
+  already serves an extensions directory, unmodified. New `apcore-a2a.openapi` Config Bus
+  section, `--from-openapi` and six `--openapi-*` CLI flags, and a new
+  `BackendSource::OpenApi` variant in Rust.
+
+  **Two repairs make it work, and neither is cosmetic.** `FR-OAS-002`: apcore-toolkit
+  derives module IDs into `[A-Za-z0-9_.-]` while apcore's `Registry` accepts only
+  `^[a-z][a-z0-9_]*(\.[a-z][a-z0-9_]*)*$` — measured against apcore 0.30.0 /
+  apcore-toolkit 0.11.1, **only two of nine realistic operation shapes register unrepaired,
+  and the canonical Swagger Petstore is entirely in the rejected set**: it scans cleanly,
+  registers nothing, and the server serves an Agent Card with zero skills without raising
+  anywhere. `FR-OAS-003`: an operation with no `summary` or `description` yields `""`, and
+  the Agent Card builder skips empty-description modules — so 80 operations with 30
+  undocumented silently became 50 skills. A `{METHOD} {path}` description is synthesized
+  instead, and the affected operations are named at INFO.
+
+- **`FR-OAS-005`, a startup warning that names the public Agent Card.** The toolkit never
+  infers `requires_approval` for any HTTP method — a `POST /charges` that moves money is
+  annotated exactly like a `POST /echo` — and the 0.6.0 public-card filter subtracts only
+  ACL-denied and approval-gated skills. So a scanned write operation is advertised on
+  `/.well-known/agent-card.json`, a route that is auth-exempt by design and that A2A
+  clients are built to crawl. apcore-mcp's equivalent exposure is a tool list behind a
+  session; A2A's is a public discovery document, which is why this binding states a
+  requirement its siblings do not.
+
+  They are **not** withheld as a class. That is a deliberate departure from the `system.*`
+  rule: `system.*` is apcore's own reserved management surface, while an OpenAPI-derived
+  module is the operator's own API, and withholding it would reproduce the silent-loss
+  failure `FR-OAS-003` exists to close. The warning is suppressed only by having nothing to
+  warn about, by every such module declaring `requires_approval` itself, or by an explicit
+  `acknowledge_unapproved_writes: true` — and **never** by the presence of an attached ACL,
+  following apcore's own rule that a governance accessor reports the absence of a gate and
+  never the presence of protection.
+
+### The runtime floor
+
+The floor spans two apcore minors. **0.29.0** is ACL and approval work: the pattern
+array (`callers` / `targets`) has its shape closed at every entry point, `ApprovalRequest`
+gains `caller_id` and `action`, and — in Rust only — `ACLRule` becomes `#[non_exhaustive]`
+while `APCore::on`/`off` return `Result`. **0.30.0** is confined to the `Config` /
+`BindingLoader` layer: `Config` gains a `project_root` accessor and a declared set of
+path-typed configuration keys, a set-but-empty `APCORE_*` path override is discarded
+rather than silently resolving to the working directory, and `bindings.dir` /
+`bindings.pattern` become canonical defaults.
+
+**The floor reaches this binding's pre-existing surface nowhere.** The apcore surface it
+imports — `Registry`, `Executor`, `Context`, `Identity`, `CancelToken`, `ACL`,
+`ErrorCodes` / `ModuleError`, `ErrorFormatterRegistry`, `Config.register_namespace` — is
+untouched by both minors, and the extensions directory arrives in all three SDKs as an
+explicit CLI argument handed straight to `Registry`, which is the "explicit wins" tier of
+§5.12.6's precedence chain.
+
+**The OpenAPI Backend is where 0.30.0 does become load-bearing**, in a way worth stating
+plainly because it inverts what was true one release ago. Through 0.6.x the `apcore-a2a`
+namespace held five scalar keys and no path-valued one, so §9.2.1 and §9.2.2 had nothing
+to say about it. `apcore-a2a.openapi.spec` is the namespace's first path-typed key — and
+apcore 0.30.0's protections for such keys **do not reach it**. Verified empirically against
+apcore 0.30.0, not inferred from the specification: `Config.path_typed_keys()` returns a
+fixed tuple of apcore's own five keys and does not change after a namespace carrying a
+path-valued default is registered, and the §9.2.1 requirement-5 empty-value discard is
+gated on that same fixed set. So `APCORE_A2A_OPENAPI_SPEC=` would be an ordinary override
+to `""` — a legal relative path to every filesystem API and never the one an operator
+meant, which is precisely the failure apcore closed for `APCORE_ACL_ROOT=` in a namespace
+the fix does not cover. `FR-OAS-004` makes the binding own the three rules instead. The
+same finding is recorded independently in apcore-mcp.
+
+### Changed
+
+- **Runtime floor raised to apcore 0.30.0 / apcore-toolkit 0.11.1** in all three SDKs
+  (`apcore>=0.30.0` / `apcore-js >=0.30.0` / `apcore = ">=0.30"`, and
+  `apcore-toolkit>=0.11.1` throughout). apcore-toolkit 0.11.0 is what makes F-12 possible
+  at all; the apcore floor is separate and carries no behaviour change for this binding.
+
+- **The Rust `apcore` upper bound is dropped** (`>=0.28, <0.29` → `>=0.30`). The bound
+  existed because two consecutive apcore minors had shipped unannounced source breaks
+  into `ACLRule` struct literals; apcore 0.29.0 closes that route by making `ACLRule`
+  `#[non_exhaustive]`, which is what the bound was buying. `docs/spec/tech-design.md`
+  §13.2 records the reasoning rather than leaving the removed bound unexplained.
+
+- **`apcore-a2a-rust`'s six `ACLRule` struct literals in `tests/integration.rs` now go
+  through `ACLRule::new`.** Test-only: `#[non_exhaustive]` makes struct-expression
+  construction a compile error for a downstream crate, `..Default::default()` included.
+  The optional `approval` and `conditions` fields are assigned after construction.
+
+### Upgrade notes
+
+An operator carrying an ACL rule whose `callers` or `targets` is `[]`, `["$or"]`,
+`["$not"]`, or a multi-operand `["$not", p1, p2]` will find it **refused at load** by
+apcore 0.29.0 rather than silently matching nothing. That is an apcore-level break, not
+one this binding introduces, but it reaches an apcore-a2a deployment through the ACL the
+Agent Card filters read: such a rule had been contributing nothing to the decision, so
+under `default_effect: allow` it was permitting the very call it named — and the public
+card was advertising the skill accordingly. See apcore's own 0.29.0 changelog for the
+per-shape migration; `["$not", p1, p2]` is the one with no mechanical rewrite.
+
 ## [0.6.0] - 2026-09-01
 
 Minor release across all three SDKs, resolving `aiperceivable/apcore-a2a` issues #2,
