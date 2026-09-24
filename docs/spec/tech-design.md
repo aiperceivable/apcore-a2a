@@ -3297,7 +3297,7 @@ def client(a2a_app):
 
 ### 13.2 Package Manifest
 
-> Snapshot of the shipped manifests at 0.6.0, trimmed of metadata that carries no
+> Snapshot of the shipped manifests at 0.8.0, trimmed of metadata that carries no
 > design information (keywords, classifiers, URLs, script aliases). The manifest
 > files in each SDK repo are authoritative; this section exists to record the
 > dependency surface the design assumes.
@@ -3312,12 +3312,12 @@ def client(a2a_app):
 
     [project]
     name = "apcore-a2a"
-    version = "0.7.0"
+    version = "0.8.0"
     requires-python = ">=3.11"
     license = "Apache-2.0"
     dependencies = [
-        "apcore>=0.30.0",
-        "apcore-toolkit>=0.11.1",
+        "apcore>=0.31.0",
+        "apcore-toolkit>=0.12.0",
         "a2a-sdk[http-server]>=1.0.0",
         "starlette>=0.40.0",
         "uvicorn>=0.30.0",
@@ -3329,7 +3329,7 @@ def client(a2a_app):
     # F-12 fetches a spec over http(s) and registers each operation as an HTTP
     # proxy, both behind apcore-toolkit's own extra.
     openapi = [
-        "apcore-toolkit[http-proxy]>=0.11.1",
+        "apcore-toolkit[http-proxy]>=0.12.0",
     ]
     dev = [
         "pytest>=7.0",
@@ -3368,7 +3368,7 @@ def client(a2a_app):
     // package.json (ESM, Node >=18)
     {
       "name": "apcore-a2a",
-      "version": "0.7.0",
+      "version": "0.8.0",
       "type": "module",
       "license": "Apache-2.0",
       "main": "./dist/index.js",
@@ -3377,8 +3377,8 @@ def client(a2a_app):
       "engines": { "node": ">=18.0.0" },
       "dependencies": {
         "@a2a-js/sdk": ">=1.0.1",
-        "apcore-js": ">=0.30.0",
-        "apcore-toolkit": ">=0.11.1",
+        "apcore-js": ">=0.31.0",
+        "apcore-toolkit": ">=0.12.0",
         "express": "^5.1.0",
         "jsonwebtoken": "^9.0.3",
         "uuid": "^13.0.0"
@@ -3409,14 +3409,14 @@ def client(a2a_app):
     # Cargo.toml (edition 2021)
     [package]
     name = "apcore-a2a"
-    version = "0.7.0"
+    version = "0.8.0"
     edition = "2021"
     license = "Apache-2.0"
     description = "A2A protocol adapter for apcore — expose apcore modules as A2A agents"
 
     [dependencies]
-    apcore = ">=0.30"
-    apcore-toolkit = ">=0.11.1"
+    apcore = ">=0.31"
+    apcore-toolkit = ">=0.12.0"
     axum = { version = "0.8", features = ["ws"] }
     tokio = { version = "1", features = ["full"] }
     tokio-stream = "0.1"

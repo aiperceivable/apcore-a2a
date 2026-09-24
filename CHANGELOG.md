@@ -5,6 +5,84 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.8.0] - 2026-09-24
+
+Minor release across all three SDKs. Raises the runtime floor to **apcore 0.31.0 / apcore-toolkit
+0.12.0** and fixes three cross-language divergences the floor raise would otherwise have
+reopened or created — none of them a change to this binding's own wire contract, all of them
+found by reviewing what the two upstream releases changed rather than by anything failing first.
+
+### Fixed
+
+- **Rust: the Agent Card ACL filter stopped agreeing with the real enforcement path for an
+  anonymous caller.** `ApCoreAgentExecutor::acl_context` exists specifically to reproduce, out of
+  pipeline, what apcore's own `BuiltinContextCreation` does before `BuiltinACLCheck` reads it, so
+  the Agent Card filter and `Executor::call()` agree about what an anonymous caller can see.
+  Through apcore 0.30, apcore-rust's own `BuiltinContextCreation` manufactured a synthetic
+  `Identity{id:"@external", type:"external"}` for a null identity — a Rust-only bug; apcore-python
+  and apcore-typescript never did this — and `acl_context` mirrored it for the same reason it
+  mirrors everything else that step does. apcore 0.31.0 fixes apcore-rust to match its siblings
+  (`PROTOCOL_SPEC` decision D-103: a null `identity` stays null, no synthetic `@external`
+  principal; `caller_id` alone still defaults to the ACL's own sentinel). Left unmirrored past the
+  floor raise, `acl_context` would have kept synthesizing an `Identity` the real pipeline no
+  longer does, so an `identity_types` / `roles` conditional ACL rule would evaluate against a
+  fabricated principal on the discovery path and against `None` on the call path — silently
+  reopening the exact divergence this method was written to prevent.
+
+- **Python and TypeScript: `global_deadline` reached apcore through a workaround for a bug in
+  apcore/apcore-js itself, and apcore 0.31.0 fixes that bug in a way that breaks the workaround.**
+  Both bindings map A2A's `execution_timeout` onto apcore's `global_deadline` so the pipeline can
+  stop cooperatively between streaming chunks — the same shape as 0.7.0's OpenAPI Backend finding
+  (`apcore-a2a.openapi.spec`, "The runtime floor" section below): the floor becoming load-bearing
+  for a code path that has nothing to do with the feature that motivated raising it.
+
+  - **Python** passed `time.monotonic() + execution_timeout`, deliberately, because
+    apcore-python's own deadline enforcement compared the value against `time.monotonic()`
+    instead of the documented `time.time()` contract — a bug this binding worked around rather
+    than reported. apcore 0.31.0 (D-99) fixes that internal comparison to match its own documented
+    contract, which **flips the failure mode**: a monotonic value (~1e5–1e6) now reads as
+    already-expired against `time.time()` (~1.8e9), so every module call through the executor
+    would have failed immediately, with the defect latent for as long as the manifest still said
+    `apcore>=0.30.0`.
+  - **TypeScript** seeded `data[CTX_GLOBAL_DEADLINE]` (ms-since-epoch) because apcore-js's
+    `BuiltinContextCreation` ignored its own first-class `Context.globalDeadline` field and only
+    ever consulted that data key. apcore 0.31.0 (D-99–D-101) makes `globalDeadline` — epoch
+    **seconds**, not milliseconds — the pipeline's only source and stops reading the data key
+    entirely, so the old workaround would have gone silently inert: task-timeout enforcement
+    disabled with no error, not a failure this binding's own test suite could have caught without
+    a dedicated assertion (added: `executor.test.ts`, spies on `Context.create`'s call arguments).
+
+  Both fixes restore identical externally-observed behaviour (timeouts enforced at the configured
+  budget) rather than changing it — an operator upgrading `apcore-a2a` alongside the floor sees no
+  difference. The risk was entirely in upgrading the floor *without* the code change, which is
+  exactly why this is a spec-repo entry and not just three SDK changelog footnotes: the same class
+  of "a workaround for the other side's bug breaks when the other side fixes it" is worth watching
+  for on every future floor raise, in either direction.
+
+### Changed — the runtime floor
+
+- **Runtime floor raised to apcore 0.31.0 / apcore-toolkit 0.12.0** in all three SDKs. apcore
+  0.31.0 is two joined audit cycles (`PROTOCOL_SPEC` v1.37.0 → v1.59.0) settling 54 cross-language
+  divergences, five of them security defects; apcore-toolkit 0.12.0 adds the Device Authorization
+  Flow (RFC 8628, unused here), threads a `pattern` parameter through `BindingLoader.load` (not
+  used by any of the three SDKs), and fixes a `$ref` sibling-key credential-disclosure defect in
+  its own schema resolver.
+- **The `$ref` sibling-key fix reaches all three SDKs with no code change of their own.** All
+  three delegate schema `$ref` resolution entirely to `apcore(-js)(-toolkit)`'s own
+  `deep_resolve_refs` / `deepResolveRefs` — none carries an independent resolver the way
+  `apcore-mcp` did (which had the identical latent bug in its own hand-rolled `_inline_refs` /
+  `inlineRefs`, fixed independently in its own 0.22.0). Worth stating plainly: a binding is only as
+  safe from this bug class as its choice not to duplicate the resolver.
+- **`sys_modules` per-group enforcement (apcore 0.31.0) does not change what any SDK registers.**
+  The four per-group `sys_modules.*.enabled` flags go from declared-but-ignored to actually
+  enforced, but their defaults were already `true`, and all three bindings only ever set the
+  top-level `sys_modules.enabled` flag, relying on those defaults — so registered-module counts
+  are unaffected.
+- Every other apcore/apcore-toolkit surface this binding's three SDKs import (`Registry`,
+  `Executor`, `Context`, `ACL.check_access`/`checkAccess`, `governance_state()`,
+  `ErrorFormatterRegistry`, `Config.register_namespace`) was checked against both changelogs'
+  breaking-change sections and needs no further change.
+
 ## [0.7.0] - 2026-09-07
 
 Minor release across all three SDKs. Two things ship together: the **OpenAPI Backend**

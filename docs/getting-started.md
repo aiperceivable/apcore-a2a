@@ -23,7 +23,7 @@ You need an existing apcore project with at least one module defined:
     pip install apcore-a2a
     ```
 
-    Requires Python 3.11+ and `apcore` 0.30.0+.
+    Requires Python 3.11+ and `apcore` 0.31.0+.
 
 === "TypeScript"
 
@@ -33,7 +33,7 @@ You need an existing apcore project with at least one module defined:
     pnpm add apcore-a2a
     ```
 
-    Requires Node.js 18+ and `apcore-js` 0.30.0+.
+    Requires Node.js 18+ and `apcore-js` 0.31.0+.
 
 === "Rust"
 
@@ -45,11 +45,11 @@ You need an existing apcore project with at least one module defined:
 
     ```toml
     [dependencies]
-    apcore-a2a = "0.6"
+    apcore-a2a = "0.8"
     tokio = { version = "1", features = ["full"] }
     ```
 
-    Requires Rust 1.75+ (edition 2021) and `apcore` 0.30+.
+    Requires Rust 1.75+ (edition 2021) and `apcore` 0.31+.
 
 ---
 
