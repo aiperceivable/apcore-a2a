@@ -1863,8 +1863,9 @@ Feature [F-12](../features/openapi-backend.md), SRS §3.16 `FR-OAS-001`…`006`.
 source. Full design in the feature spec; this section records the structure and the two decisions
 that constrain the rest of the system.
 
-**Pipeline.** `load_spec` → `OpenAPIScanner.scan` → *repairs* → `HTTPProxyRegistryWriter.write` →
-`Registry`. Every stage but the repairs lives in apcore-toolkit. Downstream — `SkillMapper`,
+**Pipeline.** `load_spec` → `OpenAPIScanner.scan` → *skip + repair* → `HTTPProxyRegistryWriter.write`
+→ `Registry`. Every stage but the skip and the repair lives in apcore-toolkit (>= 0.13.0, whose
+scanner emits every `module_id` already in apcore's Canonical ID alphabet). Downstream — `SkillMapper`,
 `SchemaConverter`, `AgentCardBuilder`, card visibility, ACL, approval, `Executor` — is the code that
 already serves an extensions directory, unmodified.
 
@@ -1875,23 +1876,34 @@ reference, so returning `None` there would silently cost `system.*` registration
 TypeScript have no `BackendSource` type; the backend returns a `Registry` that flows into the
 existing duck-typed `_resolve_registry_and_executor` / `resolveRegistryAndExecutor` path.
 
-**The two repairs, and why the backend cannot be a thin scan-then-write call.**
+**The two backend stages, and why the backend cannot be a thin scan-then-write call.**
 
-| Repair | Without it |
+| Stage | Without it |
 |---|---|
-| `FR-OAS-002` module ID projection | apcore-toolkit derives IDs into `[A-Za-z0-9_.-]`; apcore's `Registry` accepts `^[a-z][a-z0-9_]*(\.[a-z][a-z0-9_]*)*$`. Measured on apcore 0.30.0 / toolkit 0.11.1: only 2 of 9 realistic operation shapes register, and the canonical Swagger Petstore registers **nothing** — scanning succeeds, the Agent Card is empty, and nothing raises |
+| `FR-OAS-002` illegal-ID skip | apcore-toolkit >= 0.13.0 normalises every ID into apcore's alphabet (`listPets` → `list_pets`) but deliberately leaves a digit-leading segment (`/v1/2fa` → `v1.2fa.get`) or a hook's empty ID unrepaired, emitting it with a legality warning. Handed to the writer, apcore's `Registry` rejects it as a per-module write-failure ERROR, and it is still counted by the FR-OAS-003 report, the FR-OAS-005 warning and the zero-modules check |
 | `FR-OAS-003` empty-description repair | The scanner yields `""` for an operation with no `summary`/`description`, and `AgentCardBuilder` skips empty-description modules. 80 operations, 30 undocumented → 50 skills, no diagnostic |
 
-Both run inside the scanner's `transform_module` hook, in the order **caller hook → description
-repair → projection**. The projection is last so the "every registered ID is apcore-legal" invariant
-holds whatever a caller's hook returns, and it must run inside the hook so that it precedes the
-scanner's own `deduplicate_ids` — lowercasing can *create* a collision (`listPets` + `listpets`) that
-deduplication must then see. Because a hook returning nothing drops a module **silently**, reporting
-what was dropped is the backend's job, not the scanner's.
+Both run on the modules `scan` **returns**, in the order **skip → repair**, never inside the
+scanner's `transform_module` hook. The caller's own `transform_module` is handed to the scanner as
+it is, so it still runs first and the "every registered ID is apcore-legal" invariant holds
+whatever it returns — including a hook-returned `MyThing`, which the toolkit's final normalisation
+turns into `my_thing` *after* the hook. A legality check inside the hook would have skipped it.
+Collisions the naming rule creates (`listPets` + `list-pets` → `list_pets`) are resolved by the
+scanner's own `deduplicate_ids` (`list_pets_2`), because the toolkit normalises before
+deduplicating; the backend adds no naming step after the scan.
 
-**Diagnostics report post-projection IDs.** The description-repair INFO line names the IDs that
-reach the Agent Card. Naming the pre-projection ID sends the operator looking for a skill that does
-not exist — found and fixed during implementation.
+**Diagnostics report emitted IDs.** Running on `scan`'s output is what lets the skip WARNING and the
+description-repair INFO line name the IDs that reach the Agent Card: after normalisation and
+deduplication (`list_pets_2`, which an in-hook report named as a second `list_pets`), and without
+the operations `include`/`exclude` removed (an in-hook repair ran before the scanner's filters and
+reported them).
+
+**History.** Through apcore-toolkit 0.12 the scanner's alphabet was `[A-Za-z0-9_.-]` with an
+`operationId`'s case kept — measured on apcore 0.30.0 / toolkit 0.11.1, only 2 of 9 realistic
+operation shapes registered and the canonical Swagger Petstore registered **nothing**. FR-OAS-002
+was then a projection the backend ran inside `transform_module` (lowercase, `-` → `_`, drop what was
+still illegal). apcore-toolkit 0.13.0 made it redundant; the projection helpers remain exported,
+deprecated, and nothing calls them.
 
 **Configuration.** A nested `apcore-a2a.openapi` section, the namespace's first (its five existing
 keys are all scalars) and its first path-typed key. apcore 0.30.0's §9.2.1/§9.2.2 protections do

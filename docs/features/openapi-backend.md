@@ -20,6 +20,10 @@ description: "OpenAPI Backend feature spec: a fourth apcore-a2a backend source t
 > **FE-15a OpenAPI Import** in its 0.12.0, and apcore-mcp as the **OpenAPI Backend** in its 0.20.0.
 > This is the third and last consumer in the ecosystem.
 > Created: 2026-09-07
+> Revised: 2026-09-28 — apcore-toolkit 0.13.0 emits every `module_id` in apcore's Canonical ID
+> alphabet itself, so FR-OAS-002 no longer projects IDs: the backend registers the emitted ID and
+> only skips, with a warning, what the toolkit leaves illegal. Fixture `openapi_backend.json`
+> contract 2.0.
 
 ## Purpose
 
@@ -58,9 +62,10 @@ load_spec(url|path) → OpenAPIScanner.scan() → HTTPProxyRegistryWriter.write(
 **Excluded:**
 
 - The scanner and the writer themselves. Both live in apcore-toolkit; their behaviour, the
-  `module_id` derivation algorithm, and the `metadata` execution contract (`http_method` /
-  `url_path`) are specified in apcore-toolkit's `openapi-scanner.md` and pinned by that
-  repository's 24-case conformance corpus. This spec does not restate them.
+  `module_id` derivation algorithm — including, since apcore-toolkit 0.13.0, the normalisation of
+  every emitted ID into apcore's Canonical ID alphabet — and the `metadata` execution contract
+  (`http_method` / `url_path`) are specified in apcore-toolkit's `openapi-scanner.md` and pinned
+  by that repository's 33-case conformance corpus. This spec does not restate them.
 - Swagger 2.0. `OpenAPIScanner.scan` refuses anything that is not `3.0.x` / `3.1.x`.
 - Obtaining credentials for the upstream API. The writer's `auth_header_factory` hook is where a
   token arrives; producing one is the deployment's problem.
@@ -108,51 +113,80 @@ casing — an OpenAPI-derived module is a module. `metadata["display"]["a2a"]` o
 (§5.13), which is the supported route for renaming a skill whose upstream `operationId` is
 unreadable.
 
-Two things happen between the scanner and the card, and **both are the backend's job**: a derived ID
-must be projected into apcore's registry alphabet, and an empty description must be repaired.
-Without the first the registry is empty; without the second the card is silently short.
+Two things stand between the scanner's output and the card, and **both are the backend's job**:
+a module whose ID apcore's registry would still reject must be skipped *and reported*, and an empty
+description must be repaired. Without the first an unregistrable operation fails as a write error
+and is miscounted by every diagnostic; without the second the card is silently short.
 
-### Module ID projection (FR-OAS-002)
+Both run on the modules `OpenAPIScanner.scan` **returns** — after the caller's own
+`transform_module` hook, the toolkit's ID normalisation, its `include`/`exclude` filters and its
+deduplication — never inside the scanner's `transform_module` hook. That is what lets every
+diagnostic name the ID that actually reaches the Agent Card.
 
-!!! danger "Without this step the canonical Swagger Petstore yields an empty Agent Card"
-    The two alphabets do not agree, and the gap is not an edge case:
+### Registry-legal module IDs (FR-OAS-002)
 
-    - apcore-toolkit's `derive_module_id` sanitizes an operation into `[A-Za-z0-9_.-]` — mixed case
-      and hyphens survive.
-    - apcore's `Registry` accepts only `^[a-z][a-z0-9_]*(\.[a-z][a-z0-9_]*)*$`, enforced at
-      `register` and again at `Executor.call`.
+apcore's `Registry` accepts only `^[a-z][a-z0-9_]*(\.[a-z][a-z0-9_]*)*$`, enforced at `register`
+and again at `Executor.call`. Since **apcore-toolkit 0.13.0** the scanner emits every `module_id`
+in that alphabet itself
+([`openapi-scanner.md` § `module_id` Derivation](https://github.com/aiperceivable/apcore-toolkit/blob/main/docs/features/openapi-scanner.md#module_id-derivation)):
+camelCase is split into snake_case words (`listPets` → `list_pets`, `/pets/{petId}` →
+`pets.pet_id.get`), `-` and every other character outside the alphabet becomes `_`, a legal ID is
+never rewritten, and the normalisation is applied to the **final** ID — after `base_path_prefix`
+and the `derive_module_id` / `transform_module` hooks — so a `prefix` of `Pet-Store` yields
+`pet_store.…` and a hook returning `MyThing` yields `my_thing`.
 
-    Measured against apcore 0.30.0 / apcore-toolkit 0.11.1: **only two of nine realistic operation
-    shapes register unrepaired, and the canonical Swagger Petstore is entirely in the rejected set.**
-    It scans cleanly, produces a full `ScannedModule` list, registers nothing, and the server starts
-    and serves an Agent Card with zero skills. Nothing in the path raises.
+**Requirement.**
 
-**Requirement.** Before registration, every derived `module_id` MUST be projected:
+1. The backend MUST depend on apcore-toolkit **>= 0.13.0** and MUST register each module under
+   exactly the ID the scanner emitted. It MUST NOT rewrite IDs itself: every surface — the skill
+   ID on the Agent Card, ACL `targets`, the diagnostics — sees the scanner's ID.
+2. The toolkit deliberately leaves one thing unrepaired, because repairing it would mean
+   *inventing* a name: a segment that begins with a digit (`/v1/2fa` → `v1.2fa.get`, or an
+   `operationId` of `3ds`), or an empty ID, which only a hook can produce. It still emits such a
+   module, with a legality warning. The backend MUST **skip** every module whose emitted ID has a
+   segment that is not a full match of `^[a-z][a-z0-9_]*$`, **before the writer**, and MUST report
+   it at WARNING naming both the emitted ID and the offending segment.
+3. The check MUST be applied to the IDs `scan` returns. Applied inside `transform_module` it would
+   see a hook's `MyThing` before the toolkit normalises it to `my_thing`, and skip a module the
+   scanner would have repaired.
+4. One skipped operation MUST NOT fail the scan; sibling operations still register.
 
-1. lowercase;
-2. `-` → `_`;
-3. if every dot-separated segment then matches `^[a-z][a-z0-9_]*$`, use the projected ID; otherwise
-   the module is **dropped** — the ID cannot be repaired without inventing one.
+!!! note "Why skip, when the registry would refuse it anyway"
+    Handed to `HTTPProxyRegistryWriter`, an illegal ID is rejected by apcore's registry, so the
+    module never registers either way. But it surfaces as a per-module write-failure **ERROR**
+    rather than as a report naming the segment and the remedy, and — worse — it is still in the
+    set every later diagnostic reads: FR-OAS-003's report counts it, FR-OAS-005 warns about a write
+    operation that will never be on the card, and the zero-modules warning stays silent for a
+    document none of whose operations registered. Skipping first keeps every diagnostic about the
+    modules that are actually served.
 
-A dropped module MUST be reported at WARNING naming both the derived ID and the offending segment
-(e.g. `2fa`, which cannot be repaired because an apcore segment may not begin with a digit). This
-report is the backend's responsibility and cannot be delegated: the projection runs inside the
-scanner's `transform_module` hook, and a hook returning `None` drops the module **silently**.
+**Collisions created by the naming rule are the scanner's to resolve.** `listPets` and `list-pets`
+are two distinct operations to OpenAPI and one module ID to apcore (`list_pets`). The toolkit
+normalises before its own `deduplicate_ids`, so the second is renamed `list_pets_2` and carries a
+warning, which the backend re-emits. The backend adds no naming step of its own after the scan —
+one would run after deduplication, where a collision it created could no longer be renamed.
 
-**Two orderings are normative**, because implementing this in three SDKs produces two answers to
-each:
+**A caller's own `transform_module` hook runs first**, as a scanner hook; the skip and the
+description repair run afterwards on the scanner's output, so "every registered module ID is
+apcore-legal" and "every registered module has a non-empty description" hold whatever the hook
+returns.
 
-- **A caller's own `transform_module` hook runs first, the projection last.** That way "every
-  registered module ID is apcore-legal" holds unconditionally, whatever the caller's hook returns.
-- **The projection runs before the scanner's `deduplicate_ids`,** because lowercasing can *create* a
-  collision the document did not have: `listPets` and `listpets` are two distinct operations to
-  OpenAPI and one module ID to apcore. Projecting afterwards would register one and lose the other
-  with no warning; projecting first lets the scanner's own deduplication rename the second to
-  `listpets_2` and attach a warning.
-
-This is an apcore-registry constraint, not an A2A one — apcore-mcp and apcore-cli carry the
-identical projection, and the behaviour is pinned by the shared fixture below so the three
-consumers cannot drift.
+!!! info "History: the projection this replaced"
+    Through apcore-toolkit 0.12 the scanner sanitized IDs into `[A-Za-z0-9_.-]`, keeping an
+    `operationId`'s case — an alphabet no apcore registry accepts. Measured against apcore 0.30.0 /
+    apcore-toolkit 0.11.1, only two of nine realistic operation shapes registered unrepaired and
+    the canonical Swagger Petstore registered **nothing**. This binding and apcore-mcp's OpenAPI
+    backend, in all three languages, each shipped a projection to compensate — lowercase,
+    `-` → `_`, drop what was still illegal — run inside the scanner's `transform_module` hook.
+    apcore-toolkit 0.13.0 moved the rule into the scanner, once. Its main visible difference from
+    the old projection is that it splits camelCase into words, so every ID derived from a camelCase
+    `operationId` or path parameter changed (`listpets` → `list_pets`, `petstore.listpets` →
+    `petstore.list_pets`, `pets.petid.get` → `pets.pet_id.get`). Some IDs the projection had to
+    drop now register (a segment's leading `_` is stripped: `/v1/_debug/` → `v1.debug.get`). IDs
+    that were already lowercase and legal are unchanged, apart from two edge cases the toolkit's
+    CHANGELOG records (an `operationId` ending in a hyphen, and a path with no surviving segment).
+    The projection's public helpers (`project_module_id` / `projectModuleId`) remain exported,
+    deprecated, until a later minor release; nothing in the backend calls them.
 
 ### The empty-description fallback
 
@@ -200,8 +234,12 @@ the card where the operator can see it, and the INFO line tells them exactly whi
 document need `summary` fields. The synthesized form is deliberately ugly so that it reads as a
 placeholder rather than as documentation.
 
-**Interaction with `include`/`exclude`.** The fallback runs *after* the scanner's own filters, so an
-operation excluded by configuration is never synthesized for and never reported.
+**Interaction with `include`/`exclude`, deduplication and the FR-OAS-002 skip.** The fallback runs
+on the modules `scan` returns — *after* the scanner's own filters and deduplication — and only on
+those FR-OAS-002 keeps. So an operation excluded by configuration, or skipped for an illegal ID, is
+never synthesized for and never reported, and the report names each module by its emitted ID,
+dedup suffix included (`list_pets_2`, never a second `list_pets`). The denominator is the number of
+modules `scan` returned.
 
 ### ID collisions are a startup failure
 
@@ -347,10 +385,17 @@ Three ways to close the gap, in increasing order of precision:
 
 An ACL `targets` pattern is matched against the `module_id`. On an extensions directory the operator
 writes both; on an OpenAPI backend, **the upstream API's authors decide the left-hand side**. A
-document that renames `deleteUser` to `removeUser` silently changes the module ID, and a
-`targets: ["deleteUser"]` deny rule stops matching — which under `default_effect: allow` is a
-fail-open of exactly the shape apcore#112 closed inside the ACL itself. For this binding it is also
-a **card** fail-open: the skill reappears on the public card at the same moment it becomes callable.
+document that renames `deleteUser` to `removeUser` silently changes the module ID from
+`delete_user` to `remove_user`, and a `targets: ["delete_user"]` deny rule stops matching — which
+under `default_effect: allow` is a fail-open of exactly the shape apcore#112 closed inside the ACL
+itself. For this binding it is also a **card** fail-open: the skill reappears on the public card at
+the same moment it becomes callable.
+
+The naming rule can move IDs too. apcore-toolkit 0.13.0 changed every ID derived from a camelCase
+or hyphenated name (`listpets` → `list_pets`), so a rule, binding or `include`/`exclude` pattern
+written against a pre-0.13 ID stopped matching on upgrade. Write rules against the **emitted** ID —
+including a normalised `prefix` (`Pet-Store` → `pet_store`) — never against the `operationId` as
+spelled in the document.
 
 **Required guidance, and the default the backend should make easy:**
 
@@ -545,7 +590,7 @@ Builds a `Registry` from an OpenAPI document.
 | `include_deprecated` | `bool` | no | Default `true` |
 | `timeout` | `float` | no | Spec fetch timeout, default `30.0` |
 | `headers` | `dict \| None` | no | Spec fetch only |
-| `transform_module` | callable \| `None` | no | Per-module hook, applied before registration |
+| `transform_module` | callable \| `None` | no | Per-module hook, passed to the scanner: runs before the toolkit's final ID normalisation and before the FR-OAS-002 skip and FR-OAS-003 repair |
 | `auth_header_factory` | callable \| `None` | no | Passed to `HTTPProxyRegistryWriter` |
 
 ### Errors
@@ -559,9 +604,9 @@ Builds a `Registry` from an OpenAPI document.
 | No usable `base_url` | `ValueError` naming both the document and the config key |
 | Derived `module_id` collides with a module already in the registry | `ValueError` naming **every** colliding ID, sorted and deduplicated, before anything is written — reporting only the first forces one restart per collision |
 
-Two failures are deliberately **not** errors: a module whose ID cannot be projected is dropped with a
-WARNING (FR-OAS-002), and a per-module write failure is logged at ERROR while the remaining modules
-still register. Neither leaves the registry partially populated with respect to the *set* the
+Two failures are deliberately **not** errors: a module whose emitted ID apcore's registry would
+reject is skipped with a WARNING (FR-OAS-002), and a per-module write failure is logged at ERROR
+while the remaining modules still register. Neither leaves the registry partially populated with respect to the *set* the
 preflight approved.
 
 ### Returns
@@ -575,9 +620,11 @@ validation run before the first `write`.
   across all three SDKs (pinned by apcore-toolkit's own corpus plus this repository's
   `projection_*` cases).
 - **Side effects:** one outbound HTTP GET when `spec` is a URL; no filesystem writes in dynamic mode.
-- **Emits**, in this order, before returning: the FR-OAS-002 projection-drop WARNINGs, any per-module
-  scanner warnings, a zero-modules-produced WARNING, the FR-OAS-003 description-fallback INFO line,
-  per-module write-failure ERRORs (non-fatal), and the FR-OAS-005 unapproved-write WARNING.
+- **Emits**, in this order, before returning: the FR-OAS-002 illegal-ID skip WARNINGs, the scanner's
+  per-module warnings for every module that will register (a skipped module's own toolkit legality
+  warning is not repeated beside its skip line), a zero-modules-produced WARNING, the FR-OAS-003
+  description-fallback INFO line, per-module write-failure ERRORs (non-fatal), and the FR-OAS-005
+  unapproved-write WARNING.
 - **Every registered module ID is apcore-legal**, and every registered module carries a non-empty
   description. These two invariants are what FR-OAS-002 and FR-OAS-003 exist to hold, and they are
   the reason the backend cannot be a thin `scan`-then-`write` call.
@@ -588,8 +635,8 @@ validation run before the first `write`.
 
 The six report sites emit at levels that are already normative and identical across the three
 SDKs. Their **text** drifted, and a cross-language audit found five of the six carrying
-different facts rather than different phrasing — Python's projection-drop message named no
-remedy, its collision error did not say the registry was untouched, and its no-`base_url` error
+different facts rather than different phrasing — Python's drop message (now the FR-OAS-002 skip
+message) named no remedy, its collision error did not say the registry was untouched, and its no-`base_url` error
 did not say what breaks. Each of those is a fact the operator needs and one binding withheld.
 
 The table fixes what each message must **contain**. Wording may differ where a language must
@@ -597,10 +644,10 @@ name its own API; the listed facts may not go missing.
 
 | Site | Level | MUST contain |
 |---|---|---|
-| Projection drop (FR-OAS-002) | `warn` | the derived ID; the offending segment, separately identifiable from the ID; the required segment pattern `^[a-z][a-z0-9_]*$`; and the remedy — supply a `derive_module_id` / `transform_module` hook (spelled in the host language) |
+| Illegal-ID skip (FR-OAS-002) | `warn` | the emitted ID; the offending segment, separately identifiable from the ID; the required segment pattern `^[a-z][a-z0-9_]*$`; and the remedy — supply a `derive_module_id` / `transform_module` hook (spelled in the host language) |
 | Per-module scanner warning | `warn` | the module ID and the scanner's own text, unmodified |
 | Zero modules produced | `warn` | that the Agent Card will have no skills |
-| Description synthesis (FR-OAS-003) | `info` | the count, the denominator, and every affected ID **post-projection** |
+| Description synthesis (FR-OAS-003) | `info` | the count, the denominator (modules `scan` returned), and every affected ID **as emitted** — after normalisation and deduplication |
 | Per-module write failure | `error` | the module ID and the writer's `verification_error` |
 | Unapproved writes (FR-OAS-005) | `warn` | the count; the methods; the public Agent Card **and its path**; the three remedies |
 
@@ -612,7 +659,7 @@ And for the three fatal errors:
 | No `base_url` | that the document has no usable absolute `servers[0].url`, **that every proxied call would otherwise resolve against an unknown host**, and the config key to set |
 | Missing `prefix` in a mixed deployment | the key `prefix`, and why — a derived ID can collide with a project module ID |
 
-!!! note "Why the required-pattern fragment is in the drop message"
+!!! note "Why the required-pattern fragment is in the skip message"
     An operator reading *"the derived module ID has a segment (`2fa`) apcore's registry cannot
     accept"* has been told what failed and not what would succeed. `2fa` is rejected because a
     segment may not begin with a digit — which is not guessable from the message without the
@@ -627,23 +674,32 @@ the scanner's own behaviour is pinned by apcore-toolkit's corpus and is not rest
 
 | Case group | Asserts |
 |---|---|
-| `projection_*` | FR-OAS-002: `listPets` → `listpets`; `pet-store.items.get` → `pet_store.items.get`; an unprojectable segment (`2fa`) dropped **with a warning naming the ID and the segment**; `listPets` + `listpets` deduplicated to `listpets` / `listpets_2` (pins projection-before-dedup) |
+| `projection_*` | FR-OAS-002 (the case ids predate contract 2.0): the emitted ID registers unchanged — `listPets` → `list_pets`, `pet-store.items.get` → `pet_store.items.get`, prefix `Pet-Store` → `pet_store.list_pets`; a digit-leading segment (`v1.2fa.get`) skipped **with a warning naming the ID and the segment, and nothing at ERROR**; `listPets` + `list-pets` deduplicated by the scanner to `list_pets` / `list_pets_2`; a caller hook's `MyThing` normalised to `my_thing`, not skipped |
 | `spec_location_*` | FR-OAS-004's three rules: URL verbatim, empty discarded with fallthrough, relative resolved against `project_root` **and not CWD** — the case supplies a differing `cwd`, which is what makes it assert anything |
-| `description_fallback_*` | FR-OAS-003: synthesized `{METHOD} {path}` for empty/whitespace descriptions; untouched when a description exists; the operation reaches the Agent Card either way |
+| `description_*` | FR-OAS-003: synthesized `{METHOD} {path}` for empty/whitespace descriptions; untouched when a description exists; the operation reaches the Agent Card either way; the report names the emitted, deduplicated ID (`list_pets_2`) and never an operation `exclude` removed |
 | `write_warning_*` | FR-OAS-005: fires for each of POST/PUT/PATCH/DELETE; silent for a read-only document; silent under `acknowledge_unapproved_writes`; **still fires under a permissive ACL** |
 | `collision_*` | A derived-vs-project collision fails at startup naming **every** colliding ID, and leaves the registry byte-for-byte unchanged |
 | `public_card_*` | A scanned write operation with no approval requirement **is** on the public card; the same operation under an ACL rule carrying `approval: required` is **not**, and is on the extended card |
 
-Two discriminating cases carry most of the weight:
+Four discriminating cases carry most of the weight:
 
-- `unprojectable_segment_skipped_with_warning` — an implementation that merely drops the module
-  passes every other assertion in the `projection_*` group and fails this one.
+- `projection_unprojectable_segment_dropped_with_warning` — an implementation that merely drops the
+  module fails its warning assertions, and one that hands it to the writer instead (where apcore's
+  registry rejects it) fails `expected_no_error_logs`.
+- `projection_hook_output_normalised_not_skipped` — an implementation that checks legality inside
+  `transform_module`, where the retired projection ran, skips a module the scanner would have
+  repaired. On default-derived IDs the old projection is the identity (every ID the toolkit emits
+  is already lowercase and hyphen-free), so this is the case that tells the two pipelines apart.
+- `description_synthesis_report_names_the_emitted_id` and
+  `description_not_synthesized_for_excluded_operation` — a repair run inside `transform_module`
+  reports IDs before deduplication and operations before filtering.
 - `write_warning_not_suppressed_by_permissive_acl` — an implementation that gates the warning on
   `governance_state().acl_configured` passes every other case in its group and fails this one.
 
 Expectations MUST be computed by running the real apcore-toolkit scanner, never derived by reading
-its algorithm — that is how apcore-mcp's corpus was built, and the projection cases in particular
-depend on behaviour (`deduplicate_ids` ordering) that the prose does not fully determine.
+its algorithm — that is how apcore-mcp's corpus was built, and the `projection_*` cases in
+particular depend on behaviour (`deduplicate_ids` ordering) that the prose does not fully determine.
+Contract 2.0 was measured against apcore-toolkit 0.13.0 / apcore 0.31.0.
 
 ---
 

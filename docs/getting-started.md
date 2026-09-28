@@ -116,8 +116,13 @@ Install the extra first — the spec fetch and the HTTP proxy live behind it:
     A prefixed catch-all deny holds no matter what the upstream API renames. An allow-list
     of operation names fails *closed* when an ID changes, which is the safe direction.
 
-See [OpenAPI Backend](features/openapi-backend.md) for the full feature, including the
-module-ID projection and what happens to operations your document does not document.
+Each skill's ID is the module ID apcore-toolkit (>= 0.13) derives, already in apcore's ID
+alphabet — `operationId: listPets` under `prefix: petstore` becomes `petstore.list_pets` — so write
+ACL rules against that form, not against the `operationId` as the document spells it.
+
+See [OpenAPI Backend](features/openapi-backend.md) for the full feature, including how module IDs
+are derived, which operations are skipped, and what happens to operations your document does not
+document.
 
 ---
 

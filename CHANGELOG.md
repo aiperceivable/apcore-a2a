@@ -5,6 +5,77 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+Follows apcore-toolkit 0.13.0, whose `OpenAPIScanner` now emits every `module_id` in apcore's
+Canonical ID alphabet itself. The OpenAPI Backend's own module-ID projection (FR-OAS-002) is
+retired across all three SDKs, and `conformance/fixtures/openapi_backend.json` moves to
+contract 2.0.
+
+### Changed — BREAKING
+
+- **OpenAPI-derived module IDs — and therefore A2A skill IDs — change for every camelCase or
+  hyphenated `operationId` and path.** apcore-toolkit 0.13.0 splits camelCase into snake_case
+  words where the backend's projection only lowercased. Exact migration:
+  - `operationId: listPets` → `list_pets` (was `listpets`); under `prefix: petstore`,
+    `petstore.list_pets` (was `petstore.listpets`).
+  - camelCase path parameters likewise: `GET /pets/{petId}` → `pets.pet_id.get` (was
+    `pets.petid.get`).
+  - A `prefix` is normalised with the rest of the ID: `Pet-Store` → `pet_store.…`.
+  - A segment with a leading `_`, which the projection had to drop, now registers
+    (`/v1/_debug/` → `v1.debug.get`).
+  - IDs that were already lowercase and legal are unchanged (apart from the two edge cases
+    apcore-toolkit's 0.13.0 CHANGELOG records: an `operationId` ending in a hyphen, and a path
+    with no surviving segment).
+  - **ACL rules (`targets`), bindings, and `include` / `exclude` patterns keyed on old IDs must be
+    updated.** The scanner's filters match the emitted, normalised ID (`^read_audit_log$`, not
+    `readAuditLog`). The recommended prefixed catch-all deny rule (`petstore.*`) keeps holding;
+    an allow-list of old operation names fails closed until it is updated. A2A clients that call
+    skills by ID must use the new IDs.
+  - **The apcore-toolkit floor is now 0.13.0** in all three SDKs (was 0.12.0). Because the floor
+    was open-ended, a 0.8.0 install that resolves toolkit 0.13 already registers the new IDs.
+- **FR-OAS-002 is rewritten: "Registry-legal module IDs"** (feature spec, SRS, tech design, test
+  plan, PRD FR-020). The backend registers exactly the ID the scanner emitted and no longer
+  rewrites it. It still skips, with the same WARNING, a module whose emitted ID apcore's registry
+  would reject — the one case the toolkit deliberately leaves unrepaired: a segment beginning with
+  a digit (`/v1/2fa` → `v1.2fa.get`), or an empty ID from a hook. The check now runs on the IDs
+  `scan` returns, never inside `transform_module`, so a hook returning `MyThing` registers as
+  `my_thing` rather than being skipped (or, as the old in-hook projection did, becoming
+  `mything`). Collisions the naming rule creates (`listPets` + `list-pets`) are resolved by the
+  scanner's own deduplication (`list_pets`, `list_pets_2`).
+- **FR-OAS-003 criteria 5–6 reworded**, behaviour unchanged except for the fix below: the repair
+  runs on the modules `scan` returns, and its INFO line names the IDs as emitted — after
+  normalisation and deduplication (`list_pets_2`, never a second `list_pets`).
+- **`conformance/fixtures/openapi_backend.json` contract 2.0** (was 1.0), measured against
+  apcore-toolkit 0.13.0 / apcore 0.31.0. Every expected ID re-pinned; case ids kept. Inputs
+  changed in two cases to keep their intent: `projection_runs_before_deduplication` now collides
+  `listPets` + `list-pets` (`listPets` + `listpets` no longer collide), and
+  `projection_prefix_applied_before_projection` uses prefix `Pet-Store` to show the prefix
+  normalised with the ID. Three new cases — `projection_hook_output_normalised_not_skipped`,
+  `description_synthesis_report_names_the_emitted_id`,
+  `description_not_synthesized_for_excluded_operation` — and three new driver-read fields:
+  `hooks` (named, driver-implemented hooks; an unknown name must fail the case),
+  `expected_no_error_logs`, and `expected_synthesis_report`. 24 → 27 cases.
+
+### Deprecated
+
+- **`project_module_id` / `projectModuleId`** in all three SDKs (Python `DeprecationWarning`,
+  TypeScript `@deprecated`, Rust `#[deprecated]`). The projection is no longer needed and nothing
+  in the backend calls it; it keeps its behaviour and will be removed in a later minor release.
+
+### Fixed
+
+- **FR-OAS-003 reported operations that `include` / `exclude` had removed.** The repair ran inside
+  the scanner's `transform_module` hook, which runs before the scanner's own filters, so the INFO
+  line named operations that never registered and counted them against a denominator that
+  excluded them (measured on 0.8.0: `2 of 1 scanned operations … Affected: listpets, secret`). The
+  feature spec already said the opposite; all three SDKs now run the repair on `scan`'s output.
+- **`conformance/README.md` listed no `openapi_backend.json`** in its fixture inventory; added.
+- **The feature spec's ACL-stability example matched nothing.** It showed a deny rule keyed on the
+  `operationId` (`targets: ["deleteUser"]`), which no version of the backend ever registered; it
+  now uses the emitted ID (`delete_user`), and the section notes that a toolkit upgrade can move
+  IDs as surely as an upstream rename.
+
 ## [0.8.0] - 2026-09-24
 
 Minor release across all three SDKs. Raises the runtime floor to **apcore 0.31.0 / apcore-toolkit

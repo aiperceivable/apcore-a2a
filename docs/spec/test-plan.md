@@ -2195,7 +2195,7 @@ absence would let a defect ship silently; the corpus itself carries the full set
 
 ---
 
-#### TC-OAS-001: A derived module ID is projected into apcore's registry alphabet
+#### TC-OAS-001: The emitted module ID registers unchanged; an illegal one is skipped and reported
 
 | Field | Value |
 |-------|-------|
@@ -2203,18 +2203,19 @@ absence would let a defect ship silently; the corpus itself carries the full set
 | **Priority** | P0 |
 | **SRS Trace** | FR-OAS-002 |
 
-**Preconditions:** An OpenAPI 3.0 document whose operations exercise the four shapes: a camelCase `operationId` (`listPets`), a hyphenated one (`pet-store.items.get`), a path-derived id, and one whose derived id has a segment beginning with a digit (`/v1/2fa`).
+**Preconditions:** apcore-toolkit >= 0.13.0. An OpenAPI 3.0 document whose operations exercise the shapes: a camelCase `operationId` (`listPets`), a hyphenated one (`pet-store.items.get`), a path-derived id, and one whose derived id has a segment beginning with a digit (`/v1/2fa`).
 
 **Test Steps:**
-1. Build a registry through the backend; assert the registered ids are the projected forms (`listpets`, `pet_store.items.get`, …).
-2. Assert the `2fa` operation is **absent** from the registry.
-3. Assert a WARNING was emitted naming both the derived id `v1.2fa.get` **and** the offending segment `2fa`. Remove the derived id from the line first, then assert the segment is still named.
+1. Build a registry through the backend; assert the registered ids are exactly the ids the scanner emitted (`list_pets`, `pet_store.items.get`, …) — no lowercasing or other rewrite on top.
+2. Assert the `2fa` operation is **absent** from the registry, and that nothing was logged at ERROR.
+3. Assert a WARNING was emitted naming both the emitted id `v1.2fa.get` **and** the offending segment `2fa`. Remove the id from the line first, then assert the segment is still named.
 4. Assert the sibling operation in the same document still registered.
-5. Scan a document containing both `listPets` and `listpets`; assert ids `listpets` and `listpets_2`, the second carrying a rename warning.
+5. Scan a document containing both `listPets` and `list-pets`; assert ids `list_pets` and `list_pets_2`, the second carrying a rename warning.
+6. Supply a `transform_module` hook returning the id `MyThing`; assert the module registers as `my_thing` and no skip WARNING is emitted.
 
-**Expected Result:** every registered id matches `^[a-z][a-z0-9_]*(\.[a-z][a-z0-9_]*)*$`; one drop, reported; one document-level collision, renamed by the scanner.
+**Expected Result:** every registered id matches `^[a-z][a-z0-9_]*(\.[a-z][a-z0-9_]*)*$` and is the scanner's own; one skip, reported; one document-level collision, renamed by the scanner; the hook's id normalised, not skipped.
 
-**Why this case exists:** apcore-toolkit sanitizes derived ids into `[A-Za-z0-9_.-]` and apcore's `Registry` accepts a strictly narrower alphabet. Measured against apcore 0.30.0 / apcore-toolkit 0.11.1, **only two of nine realistic operation shapes register unrepaired and the canonical Swagger Petstore registers nothing** — it scans cleanly, the server starts, and the Agent Card has zero skills, with nothing raised anywhere. Step 3's subtraction is load-bearing: `"2fa"` is a substring of `"v1.2fa.get"`, so asserting both against one line passes even when the segment is never named, and the operator is then told *that* an operation was dropped but not *why*. Step 5 pins the ordering — the projection must run before the scanner's own deduplication, because lowercasing is what *creates* that collision.
+**Why this case exists:** apcore-toolkit >= 0.13.0 normalises every id into apcore's alphabet but deliberately does not repair a digit-leading segment, which would mean inventing a name — the backend must skip that module and say so. Step 2's no-ERROR assertion is what tells a skip apart from handing the id to the writer: apcore's registry rejects it there too, so the module is absent either way, but as a write failure that every later diagnostic still counts. Step 3's subtraction is load-bearing: `"2fa"` is a substring of `"v1.2fa.get"`, so asserting both against one line passes even when the segment is never named, and the operator is then told *that* an operation was skipped but not *why*. Step 5 pins that collisions the naming rule creates are resolved by the scanner's deduplication. Step 6 pins *where* the legality check runs: on the ids `scan` returns, not inside `transform_module`, where `MyThing` has not yet been normalised. It is also the only step that tells this pipeline from the pre-0.13 one, which projected inside the hook (`MyThing` → `mything`): on default-derived ids that projection is now the identity.
 
 ---
 
@@ -2226,17 +2227,19 @@ absence would let a defect ship silently; the corpus itself carries the full set
 | **Priority** | P0 |
 | **SRS Trace** | FR-OAS-003 |
 
-**Preconditions:** A document with one operation carrying neither `summary` nor `description`, one carrying a whitespace-only `summary`, and one carrying a real multi-line `description`.
+**Preconditions:** A document with one operation carrying neither `summary` nor `description`, one carrying a whitespace-only `summary`, and one carrying a real multi-line `description`. A second document with two undocumented operations whose ids collide after normalisation (`listPets`, `list-pets`), and a third with two undocumented operations, one of them removed by `exclude`.
 
 **Test Steps:**
 1. Assert the first two register with the synthesized description `{METHOD} {url_path}` (e.g. `DELETE /pets/{petId}`).
 2. Assert the third keeps the first line of its own description, untouched.
-3. Assert exactly one INFO line reports the synthesis, and that it names the **post-projection** id.
+3. Assert exactly one INFO line reports the synthesis, and that it names the **emitted** id.
 4. Assert all three appear on the Agent Card.
+5. For the colliding document, assert the synthesis line names `list_pets_2`.
+6. For the filtered document, assert the synthesis line reads `1 of 1` and does not name the excluded operation.
 
-**Expected Result:** no operation is lost; the report names the ids the card actually carries.
+**Expected Result:** no operation is lost; the report names the ids the card actually carries, and only those.
 
-**Why this case exists:** the scanner yields `""` for an undocumented operation and `AgentCardBuilder` skips empty-description modules — two individually correct behaviours that compose into a silent loss (80 operations, 30 undocumented, 50 skills, no diagnostic). Step 3 must be scoped to the synthesis line: apcore-toolkit's writer emits its own `Registered HTTP proxy: <projected id>` line, so a bare "the id appears somewhere in the log" assertion is satisfied by that and passes even when the report names the pre-projection id — an id that is not on the card and that the operator will search for in vain.
+**Why this case exists:** the scanner yields `""` for an undocumented operation and `AgentCardBuilder` skips empty-description modules — two individually correct behaviours that compose into a silent loss (80 operations, 30 undocumented, 50 skills, no diagnostic). Step 3 must be scoped to the synthesis line: apcore-toolkit's writer may log its own `Registered HTTP proxy: <id>` line, so a bare "the id appears somewhere in the log" assertion is satisfied by that and passes even when the report names some other id — one that is not on the card and that the operator will search for in vain. Steps 5 and 6 pin that the repair runs on what `scan` returns: a repair run inside the scanner's `transform_module` hook sees ids before deduplication (so it names `list_pets` twice and never `list_pets_2`) and operations before filtering (so it reported an excluded operation — measured on apcore-a2a 0.8.0 as `2 of 1 scanned operations`).
 
 ---
 
@@ -3025,7 +3028,7 @@ TASKS_CANCEL_REQUEST = lambda task_id: {
 | FR-OPS-001 | Health endpoint | TC-OPS-001 |
 | FR-OPS-002 | Metrics endpoint | TC-OPS-002 |
 | FR-OAS-001 | OpenAPI document as a backend source | TC-OAS-001–006 |
-| FR-OAS-002 | Module ID projection | TC-OAS-001 |
+| FR-OAS-002 | Registry-legal module IDs | TC-OAS-001 |
 | FR-OAS-003 | Empty-description repair | TC-OAS-002 |
 | FR-OAS-004 | Path-typed `spec` key | TC-OAS-005 |
 | FR-OAS-005 | Unapproved-write warning | TC-OAS-003, TC-OAS-004 |

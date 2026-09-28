@@ -1065,7 +1065,7 @@ apcore-a2a serve --extensions-dir ./extensions --push-notifications
 
 **Acceptance Criteria:**
 1. A spec URL or filesystem path yields a populated Registry, with one skill per operation.
-2. Derived module IDs are projected into apcore's registry alphabet; an operation that cannot be projected is dropped with a warning naming it. Without this the canonical Swagger Petstore registers nothing.
+2. Every skill registers under the module ID apcore-toolkit (>= 0.13.0) emits, which is already in apcore's registry alphabet (`listPets` → `list_pets`); an operation whose ID the registry would still reject (a segment beginning with a digit, e.g. `/v1/2fa`) is skipped with a warning naming it and the offending segment.
 3. An operation with no `summary` or `description` receives a synthesized `{METHOD} {path}` description, so it is not silently dropped by the Agent Card builder.
 4. A relative spec path resolves against the project root; a URL is used verbatim; a set-but-empty value is discarded rather than resolving to the working directory.
 5. A startup warning names scanned write operations (POST/PUT/PATCH/DELETE) that carry no approval requirement and will therefore be advertised on the unauthenticated public Agent Card. It is not suppressed by the mere presence of an ACL.

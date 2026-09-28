@@ -46,6 +46,7 @@ every SDK's conformance runner.
 | `fixtures/skill_resolution.json` | A-SKILL | missing/invalid `skillId` and unparseable parts → FAILED task (not `-32602`) |
 | `fixtures/streaming_events.json` | A-STREAM | SSE event sequence incl. terminal `lastChunk` empty-artifact marker |
 | `fixtures/part_conversion.json` | A-PART | A2A `Part` ⇄ module input/output conversion |
+| `fixtures/openapi_backend.json` | A-OAS | OpenAPI backend (feature F-12), contract 2.0 (apcore-toolkit >= 0.13.0): registered IDs are the scanner's own, illegal IDs skipped with a warning, the empty-description repair and its report, the path-typed `spec` key, the unapproved-write warning, the collision preflight, public-card exposure |
 
 ### JSON-RPC Error Code Table
 

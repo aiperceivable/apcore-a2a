@@ -1,6 +1,6 @@
 {
-  "description": "OpenAPI Backend parity (Algorithm A-OAS, feature F-12). The runner builds a Registry from each `document` via the backend entry point (load_spec -> OpenAPIScanner.scan -> projection -> HTTPProxyRegistryWriter.write) and asserts the registered module set, the repaired descriptions, the emitted diagnostics, and the resulting Agent Card. The scanner's own derivation is NOT restated here -- it is pinned by apcore-toolkit's own 24-case corpus. What this fixture owns is everything the binding adds on top: the apcore-registry ID projection (FR-OAS-002), the empty-description repair (FR-OAS-003), the path-typed spec key (FR-OAS-004), the unapproved-write warning (FR-OAS-005), and the collision preflight (FR-OAS-006). Every expectation was MEASURED against apcore-toolkit 0.11.1 / apcore 0.30.0 by running the real scanner, never derived from reading the algorithm.",
-  "contract_version": "1.0",
+  "description": "OpenAPI Backend parity (Algorithm A-OAS, feature F-12). The runner builds a Registry from each `document` via the backend entry point (load_spec -> OpenAPIScanner.scan -> skip illegal IDs + description repair -> HTTPProxyRegistryWriter.write) and asserts the registered module set, the repaired descriptions, the emitted diagnostics, and the resulting Agent Card. The scanner's own derivation -- including the normalisation of every module_id into apcore's Canonical ID alphabet (apcore-toolkit >= 0.13.0) -- is NOT restated here: it is pinned by apcore-toolkit's own 33-case corpus. What this fixture owns is everything the binding adds on top: registering exactly the ID the scanner emitted and skipping, with a warning, the ones apcore's registry would still reject (FR-OAS-002), the empty-description repair (FR-OAS-003), the path-typed spec key (FR-OAS-004), the unapproved-write warning (FR-OAS-005), and the collision preflight (FR-OAS-006). Every expectation was MEASURED against apcore-toolkit 0.13.0 / apcore 0.31.0 by running the real scanner, never derived from reading the algorithm.",
+  "contract_version": "2.0",
   "sub_algorithm": "A-OAS",
   "spec_ref": "docs/features/openapi-backend.md",
 
@@ -9,15 +9,18 @@
     "`expected_modules[].description` is the description AFTER the FR-OAS-003 repair. A case whose operation carries a summary asserts the repair did NOT fire.",
     "Annotations are asserted against apcore's own ModuleAnnotations field names (readonly/destructive/idempotent/open_world/requires_approval), never against a transport-specific projection. apcore-mcp's fixture asserts MCP ToolAnnotations hint names; that column has no A2A counterpart and is deliberately absent.",
     "`requires_approval` is asserted false on every write-method case. It is pinned as a FACT so the gap cannot be closed accidentally in one language: the scanner never infers it, for any method.",
-    "The path-derived id for `/users/{userId}` measures as `users.userid.get` on apcore-toolkit 0.11.1 -- the brace parameter contributes its name lowercased, with no underscore inserted. Do not 'correct' this to `users.user_id.get`.",
+    "contract_version 2.0 (apcore-toolkit >= 0.13.0): every expected module_id is the ID the scanner EMITS -- camelCase split into snake_case words, `-` and other characters replaced by `_`, applied after `base_path_prefix` and the hooks -- and the binding registers it unchanged. Under contract 1.0 the binding lowercased IDs itself (FR-OAS-002's old projection), so `listPets` registered as `listpets`; it now registers as `list_pets`, and `/users/{userId}` derives `users.user_id.get` (it was `users.userid.get`). The `projection_*` case ids are kept from 1.0 so CI history stays traceable; they now pin that the binding registers the ID the toolkit emits and skips only what the toolkit leaves illegal. The old projection (lowercase, `-` -> `_`) is the identity on every legal ID, so on default-derived IDs it has become a no-op; it differs observably only where it ran BEFORE the toolkit's final normalisation -- on a caller hook's output -- and that is what `projection_hook_output_normalised_not_skipped` pins.",
+    "`hooks` names a hook the DRIVER implements, following apcore-toolkit's `openapi_scan.json` convention: `{\"transform_module\": \"<name>\"}` is passed as the backend's caller-supplied transform_module option. `rename_to_mixed_case_id` returns the module unchanged except for its module_id, which it sets to the literal string `MyThing`.",
+    "`expected_no_error_logs: true` asserts that nothing was logged at ERROR. It is what distinguishes SKIPPING an illegal ID before the writer (FR-OAS-002) from handing it to the writer and letting apcore's registry reject it: that also leaves the module unregistered, but surfaces as a per-module write-failure ERROR and counts the module in every later diagnostic.",
+    "`expected_synthesis_report.contains` / `.excludes` are substrings asserted against the FR-OAS-003 INFO line itself, never against the whole log.",
     "Not pinned here: the scanner's module_id derivation, `metadata.openapi.*` contents, proxy request shaping, and upstream HTTP error wording. All belong to apcore-toolkit or to the deployment.",
-    "DRIVER REQUIREMENT: a runner MUST fail loudly when a case group named here is absent or empty, and MUST NOT fall back to an empty list. Measured 2026-09-07 by renaming `test_cases`: apcore-a2a-python failed at collection (it indexes the key), while the TypeScript runner silently dropped from 46 passing tests to 33 and the Rust runner reported 9 passing while asserting nothing. Both used an `?? []` / `unwrap_or_default()` fallback. A group rename in this file must never be able to turn a runner green. Skipping the whole suite when the spec repo is absent is a separate, legitimate case."
+    "DRIVER REQUIREMENT: a runner MUST fail loudly when a case group named here is absent or empty, and MUST NOT fall back to an empty list. Measured 2026-09-07 by renaming `test_cases`: apcore-a2a-python failed at collection (it indexes the key), while the TypeScript runner silently dropped from 46 passing tests to 33 and the Rust runner reported 9 passing while asserting nothing. Both used an `?? []` / `unwrap_or_default()` fallback. A group rename in this file must never be able to turn a runner green. Skipping the whole suite when the spec repo is absent is a separate, legitimate case. For the same reason a runner MUST fail a case whose `hooks` names a hook it does not implement, rather than ignore it and silently test the hook-free path."
   ],
 
   "test_cases": [
     {
       "id": "projection_camel_case_operation_id",
-      "description": "FR-OAS-002. The toolkit sanitizes to [A-Za-z0-9_.-]; apcore's registry accepts only ^[a-z][a-z0-9_]*(\\.[a-z][a-z0-9_]*)*$. Without the projection this module does not register and the Agent Card is empty.",
+      "description": "FR-OAS-002. apcore-toolkit >= 0.13.0 splits a camelCase operationId into snake_case words (`listPets` -> `list_pets`), so the emitted ID is already in apcore's registry alphabet ^[a-z][a-z0-9_]*(\\.[a-z][a-z0-9_]*)*$ and the binding registers it unchanged. Under contract 1.0 (apcore-toolkit 0.11/0.12, whose IDs kept their case, plus the binding's own lowercasing projection) it registered as `listpets`; an implementation still resolving a pre-0.13 toolkit fails here. Note that re-applying that projection to the EMITTED ID would not be caught by this case -- lowercasing and `-` -> `_` are the identity on a legal ID -- which is why `projection_hook_output_normalised_not_skipped` exists.",
       "document": {
         "openapi": "3.0.3",
         "info": { "title": "Pets", "version": "1.0.0" },
@@ -35,7 +38,7 @@
       "options": {},
       "expected_modules": [
         {
-          "module_id": "listpets",
+          "module_id": "list_pets",
           "description": "List all pets",
           "annotations": { "readonly": true, "destructive": false, "idempotent": false, "open_world": true, "requires_approval": false }
         }
@@ -45,7 +48,7 @@
 
     {
       "id": "projection_hyphen_to_underscore",
-      "description": "FR-OAS-002 rule 2. A hyphen is legal to the toolkit and illegal to apcore; the dots are segment separators and survive.",
+      "description": "FR-OAS-002. A hyphen is illegal to apcore's registry; apcore-toolkit >= 0.13.0 replaces it with `_` itself, and the dots are segment separators and survive. The binding registers the emitted ID unchanged.",
       "document": {
         "openapi": "3.0.3",
         "info": { "title": "Items", "version": "1.0.0" },
@@ -73,7 +76,7 @@
 
     {
       "id": "projection_unprojectable_segment_dropped_with_warning",
-      "description": "DISCRIMINATING CASE for FR-OAS-002. An apcore segment may not begin with a digit, so `2fa` cannot be repaired without inventing an ID. The module is dropped -- and because the projection runs inside the scanner's transform_module hook, a hook returning None drops it SILENTLY. An implementation that merely drops the module passes every other assertion in this group and fails this one. The sibling operation must still register: one bad operation does not fail the scan.",
+      "description": "DISCRIMINATING CASE for FR-OAS-002. An apcore segment may not begin with a digit, so `2fa` cannot be repaired without inventing an ID, and apcore-toolkit >= 0.13.0 deliberately does not: it emits `v1.2fa.get` with its own legality warning attached. The binding checks the ID `scan` RETURNED and skips the module before the writer, reporting it at WARNING with the ID and the offending segment named separately. An implementation that silently drops it fails the warning assertions; one that hands it to the writer instead also ends up with it unregistered -- apcore's registry rejects it -- but fails `expected_no_error_logs`, because the rejection surfaces as a write-failure ERROR. The sibling operation must still register: one bad operation does not fail the scan.",
       "document": {
         "openapi": "3.0.3",
         "info": { "title": "Mixed", "version": "1.0.0" },
@@ -97,7 +100,7 @@
       "options": {},
       "expected_modules": [
         {
-          "module_id": "listpets",
+          "module_id": "list_pets",
           "description": "List pets",
           "annotations": { "readonly": true, "destructive": false, "idempotent": false, "open_world": true, "requires_approval": false }
         }
@@ -105,12 +108,13 @@
       "expected_dropped": [
         { "derived_id": "v1.2fa.get", "offending_segment": "2fa" }
       ],
-      "expected_warning_substrings": ["v1.2fa.get", "2fa"]
+      "expected_warning_substrings": ["v1.2fa.get", "2fa"],
+      "expected_no_error_logs": true
     },
 
     {
       "id": "projection_runs_before_deduplication",
-      "description": "FR-OAS-002 ordering. `listPets` and `listpets` are two distinct operations to OpenAPI and one module ID to apcore -- the projection CREATES a collision the document did not have. Projecting after the scanner's deduplicate_ids would register one and lose the other with no warning. Measured: the scanner renames the second and attaches the warning itself.",
+      "description": "FR-OAS-002 ordering. `listPets` and `list-pets` are two distinct operations to OpenAPI and one module ID to apcore: the naming rule CREATES a collision the document did not have (both normalise to `list_pets`). apcore-toolkit >= 0.13.0 normalises before its own deduplicate_ids, so the scanner renames the second to `list_pets_2` and attaches the warning itself (measured); the binding must register both under the emitted IDs and re-emit that warning. The rename happens inside the scanner; a collision created by any naming step the binding added AFTER the scan would arrive after deduplication and be caught only by the FR-OAS-006 preflight -- as a startup failure, not a rename -- which is why naming belongs to the toolkit. Under contract 1.0 this case used `listPets` + `listpets`; those no longer collide (`list_pets`, `listpets`), so the inputs were changed to keep the collision.",
       "document": {
         "openapi": "3.0.3",
         "info": { "title": "Collide", "version": "1.0.0" },
@@ -125,8 +129,8 @@
           },
           "/b": {
             "get": {
-              "operationId": "listpets",
-              "summary": "Lower variant",
+              "operationId": "list-pets",
+              "summary": "Hyphen variant",
               "responses": { "200": { "description": "ok" } }
             }
           }
@@ -135,13 +139,13 @@
       "options": {},
       "expected_modules": [
         {
-          "module_id": "listpets",
+          "module_id": "list_pets",
           "description": "Camel variant",
           "annotations": { "readonly": true, "destructive": false, "idempotent": false, "open_world": true, "requires_approval": false }
         },
         {
-          "module_id": "listpets_2",
-          "description": "Lower variant",
+          "module_id": "list_pets_2",
+          "description": "Hyphen variant",
           "annotations": { "readonly": true, "destructive": false, "idempotent": false, "open_world": true, "requires_approval": false },
           "warnings_contain": "renamed"
         }
@@ -151,7 +155,7 @@
 
     {
       "id": "projection_prefix_applied_before_projection",
-      "description": "FR-OAS-002 with `prefix`. The prefix is the scanner's base_path_prefix and is already part of the derived ID when the projection sees it.",
+      "description": "FR-OAS-002 with `prefix`. The prefix is the scanner's base_path_prefix, and apcore-toolkit >= 0.13.0 normalises the FINAL ID -- prefix included -- so `Pet-Store` + `listPets` is emitted as `pet_store.list_pets` and registers unchanged. An ACL rule or include/exclude pattern must therefore name the normalised prefix (`pet_store.*`), not the configured spelling. Under contract 1.0 this case used the already-legal prefix `petstore` and expected `petstore.listpets`.",
       "document": {
         "openapi": "3.0.3",
         "info": { "title": "Pets", "version": "1.0.0" },
@@ -166,10 +170,39 @@
           }
         }
       },
-      "options": { "prefix": "petstore" },
+      "options": { "prefix": "Pet-Store" },
       "expected_modules": [
         {
-          "module_id": "petstore.listpets",
+          "module_id": "pet_store.list_pets",
+          "description": "List pets",
+          "annotations": { "readonly": true, "destructive": false, "idempotent": false, "open_world": true, "requires_approval": false }
+        }
+      ],
+      "expected_dropped": []
+    },
+
+    {
+      "id": "projection_hook_output_normalised_not_skipped",
+      "description": "DISCRIMINATING CASE for where FR-OAS-002's legality check runs. The caller's transform_module hook returns the ID `MyThing`. apcore-toolkit >= 0.13.0 normalises the final ID AFTER that hook, so the scanner emits `my_thing` -- a legal ID the binding must register. An implementation that checks legality inside transform_module (where the contract-1.0 projection ran) sees `MyThing`, judges it illegal and skips a module the scanner would have repaired; one that still projects registers `mything`. The check belongs on the IDs `scan` returns.",
+      "document": {
+        "openapi": "3.0.3",
+        "info": { "title": "Pets", "version": "1.0.0" },
+        "servers": [{ "url": "https://api.example.com" }],
+        "paths": {
+          "/pets": {
+            "get": {
+              "operationId": "listPets",
+              "summary": "List pets",
+              "responses": { "200": { "description": "ok" } }
+            }
+          }
+        }
+      },
+      "options": {},
+      "hooks": { "transform_module": "rename_to_mixed_case_id" },
+      "expected_modules": [
+        {
+          "module_id": "my_thing",
           "description": "List pets",
           "annotations": { "readonly": true, "destructive": false, "idempotent": false, "open_world": true, "requires_approval": false }
         }
@@ -196,14 +229,14 @@
       "options": { "acknowledge_unapproved_writes": true },
       "expected_modules": [
         {
-          "module_id": "deletepet",
+          "module_id": "delete_pet",
           "description": "DELETE /pets/{petId}",
           "description_was_synthesized": true,
           "annotations": { "readonly": false, "destructive": true, "idempotent": false, "open_world": true, "requires_approval": false }
         }
       ],
       "expected_dropped": [],
-      "expected_on_agent_card": ["deletepet"]
+      "expected_on_agent_card": ["delete_pet"]
     },
 
     {
@@ -226,14 +259,14 @@
       "options": {},
       "expected_modules": [
         {
-          "module_id": "listpets",
+          "module_id": "list_pets",
           "description": "GET /pets",
           "description_was_synthesized": true,
           "annotations": { "readonly": true, "destructive": false, "idempotent": false, "open_world": true, "requires_approval": false }
         }
       ],
       "expected_dropped": [],
-      "expected_on_agent_card": ["listpets"]
+      "expected_on_agent_card": ["list_pets"]
     },
 
     {
@@ -256,13 +289,91 @@
       "options": {},
       "expected_modules": [
         {
-          "module_id": "listpets",
+          "module_id": "list_pets",
           "description": "First line here.",
           "description_was_synthesized": false,
           "annotations": { "readonly": true, "destructive": false, "idempotent": false, "open_world": true, "requires_approval": false }
         }
       ],
       "expected_dropped": []
+    },
+
+    {
+      "id": "description_synthesis_report_names_the_emitted_id",
+      "description": "FR-OAS-003 criterion 5: the INFO line names the IDs that reach the Agent Card. Both operations are undocumented, and apcore-toolkit >= 0.13.0 normalises both to `list_pets` before deduplicating the second to `list_pets_2`. A repair that records the ID from inside the scanner's transform_module hook -- where the contract-1.0 repair ran -- sees `list_pets` twice, because deduplication has not happened yet, and never names `list_pets_2`: a skill that IS on the card, missing from the report. The report must be built from the IDs `scan` returns.",
+      "document": {
+        "openapi": "3.0.3",
+        "info": { "title": "Collide", "version": "1.0.0" },
+        "servers": [{ "url": "https://api.example.com" }],
+        "paths": {
+          "/a": {
+            "get": {
+              "operationId": "listPets",
+              "responses": { "200": { "description": "ok" } }
+            }
+          },
+          "/b": {
+            "get": {
+              "operationId": "list-pets",
+              "responses": { "200": { "description": "ok" } }
+            }
+          }
+        }
+      },
+      "options": {},
+      "expected_modules": [
+        {
+          "module_id": "list_pets",
+          "description": "GET /a",
+          "description_was_synthesized": true,
+          "annotations": { "readonly": true, "destructive": false, "idempotent": false, "open_world": true, "requires_approval": false }
+        },
+        {
+          "module_id": "list_pets_2",
+          "description": "GET /b",
+          "description_was_synthesized": true,
+          "annotations": { "readonly": true, "destructive": false, "idempotent": false, "open_world": true, "requires_approval": false },
+          "warnings_contain": "renamed"
+        }
+      ],
+      "expected_dropped": [],
+      "expected_synthesis_report": { "contains": ["2 of 2", "list_pets_2"], "excludes": [] },
+      "expected_on_agent_card": ["list_pets", "list_pets_2"]
+    },
+
+    {
+      "id": "description_not_synthesized_for_excluded_operation",
+      "description": "FR-OAS-003 and the scanner's filters. `exclude` removes the second operation, so it is never repaired and never reported: the report counts and names only operations the scan returned. A repair run inside the scanner's transform_module hook -- where the contract-1.0 repair ran -- fires BEFORE the scanner's filter_modules, so it reported the excluded operation too (measured on apcore-a2a 0.8.0: `2 of 1 scanned operations ... Affected: listpets, secret`). The filter also shows that include/exclude match the EMITTED, normalised ID: the pattern is `^read_audit_log$`, not the operationId `readAuditLog`.",
+      "document": {
+        "openapi": "3.0.3",
+        "info": { "title": "Filtered", "version": "1.0.0" },
+        "servers": [{ "url": "https://api.example.com" }],
+        "paths": {
+          "/pets": {
+            "get": {
+              "operationId": "listPets",
+              "responses": { "200": { "description": "ok" } }
+            }
+          },
+          "/internal/audit": {
+            "get": {
+              "operationId": "readAuditLog",
+              "responses": { "200": { "description": "ok" } }
+            }
+          }
+        }
+      },
+      "options": { "exclude": "^read_audit_log$" },
+      "expected_modules": [
+        {
+          "module_id": "list_pets",
+          "description": "GET /pets",
+          "description_was_synthesized": true,
+          "annotations": { "readonly": true, "destructive": false, "idempotent": false, "open_world": true, "requires_approval": false }
+        }
+      ],
+      "expected_dropped": [],
+      "expected_synthesis_report": { "contains": ["1 of 1", "list_pets"], "excludes": ["read_audit_log", "readAuditLog", "/internal/audit"] }
     },
 
     {
@@ -284,7 +395,7 @@
       "options": { "base_url": "https://api.example.com" },
       "expected_modules": [
         {
-          "module_id": "listpets",
+          "module_id": "list_pets",
           "description": "List pets",
           "annotations": { "readonly": true, "destructive": false, "idempotent": false, "open_world": true, "requires_approval": false }
         }
@@ -309,11 +420,11 @@
       },
       "options": { "acknowledge_unapproved_writes": true },
       "expected_modules": [
-        { "module_id": "readop", "description": "read", "annotations": { "readonly": true, "destructive": false, "idempotent": false, "open_world": true, "requires_approval": false } },
-        { "module_id": "writeop", "description": "write", "annotations": { "readonly": false, "destructive": false, "idempotent": false, "open_world": true, "requires_approval": false } },
-        { "module_id": "putop", "description": "put", "annotations": { "readonly": false, "destructive": false, "idempotent": true, "open_world": true, "requires_approval": false } },
-        { "module_id": "delop", "description": "delete", "annotations": { "readonly": false, "destructive": true, "idempotent": false, "open_world": true, "requires_approval": false } },
-        { "module_id": "patchop", "description": "patch", "annotations": { "readonly": false, "destructive": false, "idempotent": false, "open_world": true, "requires_approval": false } }
+        { "module_id": "read_op", "description": "read", "annotations": { "readonly": true, "destructive": false, "idempotent": false, "open_world": true, "requires_approval": false } },
+        { "module_id": "write_op", "description": "write", "annotations": { "readonly": false, "destructive": false, "idempotent": false, "open_world": true, "requires_approval": false } },
+        { "module_id": "put_op", "description": "put", "annotations": { "readonly": false, "destructive": false, "idempotent": true, "open_world": true, "requires_approval": false } },
+        { "module_id": "del_op", "description": "delete", "annotations": { "readonly": false, "destructive": true, "idempotent": false, "open_world": true, "requires_approval": false } },
+        { "module_id": "patch_op", "description": "patch", "annotations": { "readonly": false, "destructive": false, "idempotent": false, "open_world": true, "requires_approval": false } }
       ],
       "expected_dropped": []
     }
@@ -440,8 +551,8 @@
       },
       "options": { "acknowledge_unapproved_writes": true },
       "acl": null,
-      "expected_public_card_skills": ["createcharge"],
-      "expected_extended_card_skills": ["createcharge"]
+      "expected_public_card_skills": ["create_charge"],
+      "expected_extended_card_skills": ["create_charge"]
     },
     {
       "id": "approval_required_acl_withholds_from_public_card_only",
@@ -458,11 +569,11 @@
       "acl": {
         "default_effect": "allow",
         "rules": [
-          { "callers": ["*"], "targets": ["createcharge"], "effect": "allow", "approval": "required" }
+          { "callers": ["*"], "targets": ["create_charge"], "effect": "allow", "approval": "required" }
         ]
       },
       "expected_public_card_skills": [],
-      "expected_extended_card_skills": ["createcharge"]
+      "expected_extended_card_skills": ["create_charge"]
     }
   ],
 
@@ -514,9 +625,9 @@
         }
       },
       "options": {},
-      "preexisting_registry_module_ids": ["listpets", "getstore"],
-      "expected_error_substrings": ["listpets", "getstore"],
-      "expected_registry_module_ids_after": ["getstore", "listpets"]
+      "preexisting_registry_module_ids": ["list_pets", "get_store"],
+      "expected_error_substrings": ["list_pets", "get_store"],
+      "expected_registry_module_ids_after": ["get_store", "list_pets"]
     }
   ]
 }

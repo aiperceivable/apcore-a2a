@@ -1794,7 +1794,7 @@ on the other end.
 
 ---
 
-#### FR-OAS-002: Module ID projection into apcore's registry alphabet
+#### FR-OAS-002: Registry-legal module IDs
 
 | Field | Value |
 |-------|-------|
@@ -1802,17 +1802,17 @@ on the other end.
 | **Priority** | P0 |
 | **PRD Trace** | FR-020 |
 
-**Description:** The system SHALL project every derived `module_id` into apcore's registry alphabet before registration, and SHALL report every operation it cannot project.
+**Description:** The system SHALL register every scanned module under exactly the `module_id` apcore-toolkit emitted, and SHALL skip, with a WARNING, every module whose emitted ID apcore's registry would reject.
 
-**Rationale:** apcore-toolkit sanitizes a derived ID into `[A-Za-z0-9_.-]`; apcore's `Registry` accepts only `^[a-z][a-z0-9_]*(\.[a-z][a-z0-9_]*)*$`. Measured against apcore 0.30.0 / apcore-toolkit 0.11.1, only two of nine realistic operation shapes register unrepaired, and the canonical Swagger Petstore is entirely in the rejected set — it scans cleanly, registers nothing, and the server serves an Agent Card with zero skills without raising anywhere.
+**Rationale:** apcore's `Registry` accepts only `^[a-z][a-z0-9_]*(\.[a-z][a-z0-9_]*)*$`. Since apcore-toolkit 0.13.0 the scanner emits every ID in that alphabet itself — camelCase split into snake_case words (`listPets` → `list_pets`), `-` and other characters replaced by `_`, a legal ID never rewritten — applied to the final ID, after `base_path_prefix` and the `derive_module_id` / `transform_module` hooks. The one thing it deliberately does not repair, because repairing it would invent a name, is a segment that begins with a digit (`/v1/2fa` → `v1.2fa.get`) or an empty ID from a hook: it emits such a module with a legality warning and leaves the decision to the consumer. Handed to the writer, the registry rejects it as a per-module write failure — the module is not registered either way, but it would surface as an ERROR and still be counted by every later diagnostic. Through apcore-toolkit 0.12 the scanner's alphabet was `[A-Za-z0-9_.-]`, and this requirement was a projection the backend ran itself (lowercase, `-` → `_`); it no longer exists, so camelCase- and hyphen-derived IDs changed with the toolkit upgrade (`listpets` → `list_pets`).
 
 **Acceptance Criteria:**
-1. The projection SHALL lowercase the derived ID and replace `-` with `_`.
-2. If every dot-separated segment then matches `^[a-z][a-z0-9_]*$`, the projected ID SHALL be used; otherwise the module SHALL be dropped.
-3. A dropped module SHALL be reported at WARNING naming both the derived ID and the offending segment. This report SHALL NOT be delegated to the scanner, whose `transform_module` hook drops a module silently when it returns nothing.
-4. A caller-supplied `transform_module` hook SHALL run before the projection, so that "every registered module ID is apcore-legal" holds unconditionally.
-5. The projection SHALL run before the scanner's own deduplication, because lowercasing can create a collision the document did not have (`listPets` and `listpets`).
-6. One unprojectable operation SHALL NOT fail the scan; sibling operations SHALL still register.
+1. The system SHALL require apcore-toolkit 0.13.0 or later, and SHALL NOT rewrite the IDs the scanner emits: the registered ID, the Agent Card skill ID, the ID ACL `targets` match and the IDs named in diagnostics SHALL all be the emitted ID.
+2. A module whose emitted ID has a dot-separated segment that is not a full match of `^[a-z][a-z0-9_]*$` SHALL be skipped before the writer, and SHALL be reported at WARNING naming both the emitted ID and the offending segment.
+3. The check in criterion 2 SHALL be applied to the modules `OpenAPIScanner.scan` returns — after the toolkit's normalisation, filters and deduplication — and SHALL NOT be applied inside a `transform_module` hook, where a hook-returned `MyThing` has not yet been normalised to the legal `my_thing`.
+4. A caller-supplied `transform_module` hook SHALL run first (it is handed to the scanner), so that "every registered module ID is apcore-legal" holds whatever it returns.
+5. A collision the naming rule creates (`listPets` and `list-pets` both become `list_pets`) SHALL be resolved by the scanner's own deduplication (`list_pets`, `list_pets_2`, with a warning the system re-emits); the system SHALL NOT add a naming step after the scan.
+6. One skipped operation SHALL NOT fail the scan; sibling operations SHALL still register.
 
 ---
 
@@ -1833,8 +1833,8 @@ on the other end.
 2. The repair SHALL NOT fire when the scanner produced a non-empty description.
 3. A whitespace-only description SHALL be treated exactly as an absent one.
 4. The system SHALL report at INFO the count and the affected module IDs.
-5. The reported IDs SHALL be the post-projection IDs — the ones that reach the Agent Card. Reporting a pre-projection ID directs the operator to a skill that does not exist.
-6. The repair SHALL run after any caller-supplied `transform_module` hook and before the FR-OAS-002 projection.
+5. The reported IDs SHALL be the emitted IDs — the ones that reach the Agent Card, after the toolkit's normalisation and deduplication (`list_pets_2`, never a second `list_pets`). Reporting any other ID directs the operator to a skill that does not exist.
+6. The repair SHALL run on the modules `OpenAPIScanner.scan` returns — after any caller-supplied `transform_module` hook and the scanner's own filters — and only on the modules FR-OAS-002 keeps, so an operation removed by `include`/`exclude` or skipped for an illegal ID is never synthesized for and never reported.
 
 ---
 
