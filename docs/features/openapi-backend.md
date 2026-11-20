@@ -253,6 +253,21 @@ registry behind.
 
 ---
 
+### Forwarding checks before registration
+
+The standalone backend uses the toolkit's effective-parameter scanner and
+proxy diagnostics. The scanner merges inherited parameters, resolves local
+references, and applies operation-level overrides. The backend checks the
+modules that remain after the scanner filters and module-ID checks. If any of
+those operations cannot be forwarded, backend construction fails before any
+OpenAPI module is registered. Each reported finding identifies its operation
+and reason. An excluded operation does not block startup.
+
+For OpenAPI routes, only braces delimit path parameters. The preflight also
+checks that the proxy can encode the declared path and query parameters.
+
+This entry point requires apcore-toolkit 0.15.0 or later.
+
 ## Governance
 
 This is the part of the feature that is not mechanical, and the A2A binding has one exposure the
@@ -600,9 +615,10 @@ Builds a `Registry` from an OpenAPI document.
 | `prefix` absent while an extensions directory is also configured | `ValueError` naming `prefix`. Checked **first**, before any fetch or scan |
 | `spec` empty after FR-OAS-004 discard, with no fallback tier | `ValueError` / `Error` naming the key |
 | Spec fetch or parse failure | propagated from `load_spec`, naming the resolved location, **never the headers** |
-| Document is not OpenAPI 3.0.x / 3.1.x | propagated from `OpenAPIScanner.scan` |
+| Document is not OpenAPI 3.0.x / 3.1.x | propagated from the toolkit scanner |
 | No usable `base_url` | `ValueError` naming both the document and the config key |
 | Derived `module_id` collides with a module already in the registry | `ValueError` naming **every** colliding ID, sorted and deduplicated, before anything is written — reporting only the first forces one restart per collision |
+| A selected operation cannot be forwarded | Backend construction fails before registration, naming the operation and reason |
 
 Two failures are deliberately **not** errors: a module whose emitted ID apcore's registry would
 reject is skipped with a WARNING (FR-OAS-002), and a per-module write failure is logged at ERROR

@@ -219,6 +219,14 @@
         "servers": [{ "url": "https://api.example.com" }],
         "paths": {
           "/pets/{petId}": {
+            "parameters": [
+              {
+                "name": "petId",
+                "in": "path",
+                "required": true,
+                "schema": {"type": "string"}
+              }
+            ],
             "delete": {
               "operationId": "deletePet",
               "responses": { "200": { "description": "ok" } }
